@@ -53,6 +53,71 @@ static t_option *get_option_long(t_option *options, char *opt) {
     return NULL;
 }
 
+static void print_spaces(int count) {
+    while (count-- > 0) {
+        ft_printf(" ");
+    }
+}
+
+static void print_helper(t_option *options) {
+    ft_printf("usage: ./ft_traceroute <host> [options]\n");
+    ft_printf("options:\n");
+
+    for (size_t i = 0; options[i].short_opt || (options[i].long_opt && options[i].long_opt[0]); i++) {
+        int len = 0;
+        
+        ft_printf("  ");
+        len += 2;
+        
+        if (options[i].short_opt) {
+            ft_printf("-%c", options[i].short_opt);
+            len += 2;
+            if (options[i].long_opt && options[i].long_opt[0]) {
+                ft_printf("  ");
+                len += 2;
+            }
+        } else if (options[i].long_opt && options[i].long_opt[0]) {
+            ft_printf("    ");
+            len += 4;
+        }
+
+        if (options[i].long_opt && options[i].long_opt[0]) {
+            ft_printf("--%s", options[i].long_opt);
+            len += 2 + ft_strlen(options[i].long_opt);
+        }
+
+        if (options[i].has_argument && options[i].data.arg.meta) {
+            ft_printf(" <%s>", options[i].data.arg.meta);
+            len += 3 + ft_strlen(options[i].data.arg.meta);
+        }
+
+        int pad = 24 - len;
+        if (pad > 0) {
+            print_spaces(pad);
+        } else {
+            ft_printf(" ");
+        }
+
+        ft_printf("%s\n", options[i].description ? options[i].description : "");
+    }
+}
+
+static bool check_helper(char **argv) {
+    for (char **arg = argv + 1; *arg; arg++) {
+        if ((*arg)[0] != '-') {
+            continue;
+        }
+
+        if ((*arg)[1] != '-' && ft_strchr(*arg + 1, 'h') != NULL) {
+            return true;
+        } else if (ft_strcmp(*arg + 2, "help") == 0) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 static int parse_short_option(t_context *ctx, char ***argv) {
     char *curr_str = **argv;
     int len = ft_strlen(curr_str);
@@ -70,7 +135,7 @@ static int parse_short_option(t_context *ctx, char ***argv) {
         if (!option->has_argument) {
             option->data.flag.is_set = true;
             continue;
-        }
+        } 
 
         if (i == len - 1 && (*argv)[1]) {
             (*argv)++;
@@ -137,11 +202,6 @@ static struct in_addr *get_host_address(char *host_str) {
 }
 
 static int set_host_address(t_context *ctx, char *host_str) {
-    if (ctx->host) {
-        ft_fprintf(STDERR_FILENO, "error: extra argument '%s'\n", host_str);
-        return 1;
-    }
-
     ctx->host = get_host_address(host_str);
     if (!ctx->host) {
         return 1;
@@ -150,22 +210,25 @@ static int set_host_address(t_context *ctx, char *host_str) {
     return 0;
 }
 
-
 static int parse_args(t_context *ctx, int argc, char **argv) {
-    char **curr = argv + 1;
-    for (curr; *curr; curr++) {
+    if (check_helper(argv)) {
+        return 2;
+    }
+
+    char *host_str = NULL;
+    for (char **arg = argv + 1; *arg; arg++) {
         int err = 0;
 
-        if (ft_strlen(*curr) > 1 && (*curr)[0] == '-' && (*curr)[1] != '-') {
-            err = parse_short_option(ctx, &curr);
+        if ((*arg)[0] == '-' && (*arg)[1] && (*arg)[1] != '-') {
+            err = parse_short_option(ctx, &arg);
         }
-        else if (ft_strlen(*curr) > 2 && (*curr)[0] == '-' && (*curr)[1] == '-' && (*curr)[2] != '-') {
-            err = parse_long_option(ctx, &curr);
+        else if ((*arg)[0] == '-' && (*arg)[1] == '-' && (*arg)[2] && (*arg)[2] != '-') {
+            err = parse_long_option(ctx, &arg);
         }
-        else if (!ctx->host) {
-            err = set_host_address(ctx, *curr);
+        else if (!host_str) {
+            host_str = *arg;
         } else {
-            ft_fprintf(STDERR_FILENO, "error: extra argument '%s'\n", *curr);
+            ft_fprintf(STDERR_FILENO, "error: extra argument '%s'\n", *arg);
             return 1;
         }
 
@@ -173,9 +236,11 @@ static int parse_args(t_context *ctx, int argc, char **argv) {
             return 1;
         }
     }
-
-    if (!ctx->host) {
-        // TODO: show usage
+    
+    if (!host_str) {
+        ft_fprintf(STDERR_FILENO, "error: missing \"host\" argument\n");
+        return 1;
+    } else if (set_host_address(ctx, host_str) != 0) {
         return 1;
     }
 
@@ -187,12 +252,17 @@ static t_option *init_options() {
         {
             .short_opt = 'h',
             .long_opt = "help",
-            .description = "Show this help and exit",
+            .description = "Print this help message and exit",
             .has_argument = false,
         },
     };
 
     return options;
+}
+
+void free_ctx(t_context *ctx) {
+    free(ctx->host);
+    free(ctx);
 }
 
 t_context *init_ctx(int argc, char **argv) {
@@ -205,10 +275,19 @@ t_context *init_ctx(int argc, char **argv) {
     ctx->options = init_options();
     ctx->host = NULL;
 
+    if (argc < 2) {
+        print_helper(ctx->options);
+        free_ctx(ctx);
+        return NULL;
+    }
+
     int err = parse_args(ctx, argc, argv);
-    if (err != 0) {
-        free(ctx->host);
-        free(ctx);
+    if (err == 2) {
+        print_helper(ctx->options);
+        free_ctx(ctx);
+        exit(EXIT_SUCCESS);
+    } else if (err != 0) {
+        free_ctx(ctx);
         return NULL;
     }
 
@@ -222,7 +301,6 @@ int main(int argc, char **argv) {
     }
 
     ft_printf("%s\n", inet_ntoa(*ctx->host));
-    free(ctx->host);
-    free(ctx);
+    free_ctx(ctx);
     return 0;
 }
