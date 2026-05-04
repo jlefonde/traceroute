@@ -9,48 +9,92 @@
 #include <stdbool.h>
 #include <arpa/inet.h>
 
-typedef struct s_options
-{
+typedef struct s_option {
     const char short_opt;
     const char *long_opt;
     const char *description;
-    bool has_argument;
+    const bool has_argument;
 
-    union
-    {
-        struct
-        {
+    union {
+        struct {
             const char *meta;
             char *value;
         } arg;
 
-        struct
-        {
+        struct {
             bool is_set;
         } flag;
     } data;
-} t_options;
+} t_option;
 
-int parse_short_option(t_options *options, size_t option_len, char *option)
-{
-    for (int j = 1; j < ft_strlen(option); j++)
+static t_option options[] = {
     {
-        int option_idx = -1;
-        char flag = option[j];
+        .short_opt = '4',
+        .long_opt = "4",
+        .description = "Show this help and exit",
+        .has_argument = false,
+    },
+    {
+        .short_opt = 'i',
+        .long_opt = "i",
+        .description = "Show this help and exit",
+        .has_argument = true,
+        .data.arg.meta = "device",
+    },
+    {
+        .short_opt = 'g',
+        .long_opt = "g",
+        .description = "Show this help and exit",
+        .has_argument = true,
+        .data.arg.meta = "gate,...",
+    },
+};
 
-        for (int k = 0; k < option_len / sizeof(t_options); k++)
-        {
-            if (options[k].short_opt == flag)
-            {
-                option_idx = k;
-                options[k].data.flag.is_set = true;
-                break;
-            }
+static t_option *get_option_short(char opt) {
+    for (size_t i = 0; i < sizeof(options) / sizeof(t_option); i++) {
+        if (options[i].short_opt == opt) {
+            return &options[i];
+        }
+    }
+
+    return NULL;
+}
+
+static t_option *get_option_long(char *opt) {
+    for (size_t i = 0; i < sizeof(options) / sizeof(t_option); i++) {
+        if (ft_strcmp(options[i].long_opt, opt) == 0) {
+            return &options[i];
+        }
+    }
+
+    return NULL;
+}
+
+int parse_short_option(char ***argv) {
+    char *curr_str = **argv;
+    int len = ft_strlen(curr_str);
+
+    for (int i = 1; i < len; i++) {
+        int option_idx = -1;
+        char short_opt = curr_str[i];
+
+        t_option *option = get_option_short(short_opt);
+        if (!option) {
+            ft_fprintf(STDERR_FILENO, "ft_traceroute: bad option '-%c'\n", short_opt);
+            return 1;
         }
 
-        if (option_idx == -1)
-        {
-            ft_fprintf(STDERR_FILENO, "ft_traceroute: bad option '-%c'\n", flag);
+        if (!option->has_argument) {
+            option->data.flag.is_set = true;
+            continue;
+        }
+
+        if (i == len - 1 && (*argv)[1]) {
+            (*argv)++;
+            option->data.arg.value = **argv;
+        }
+        else {
+            ft_fprintf(STDERR_FILENO, "ft_traceroute: option '-%c' requires an argument\n", short_opt);
             return 1;
         }
     }
@@ -58,37 +102,60 @@ int parse_short_option(t_options *options, size_t option_len, char *option)
     return 0;
 }
 
-int main(int argc, char **argv)
-{
-    t_options options[] = {
-        {
-            .short_opt = 'h',
-            .long_opt = "help",
-            .description = "Show this help and exit",
-        },
-    };
+int parse_long_option(char ***argv) {
+    int option_idx = -1;
+    char *long_opt = (**argv) + 2;
 
-    for (int i = 1; i < argc; i++)
-    {
-        int res;
-
-        if (ft_strlen(argv[i]) > 1 && argv[i][0] == '-' && argv[i][1] != '-') {
-            res = parse_short_option(options, sizeof(options), argv[i]);
-        }
-
-        if (res != 0) {
-            exit(EXIT_FAILURE);
-        }
-
-        // if (!options[option_idx].has_argument) {
-        // } else if ((i + 1) < argc) {
-        //     options[option_idx].data.arg.value = argv[++i];
-        // } else {
-        //     ft_printf("arg required\n");
-        // }
+    t_option *option = get_option_long(long_opt);
+    if (!option) {
+        ft_fprintf(STDERR_FILENO, "ft_traceroute: bad option '-%s'\n", long_opt);
+        return 1;
     }
 
-    struct addrinfo *res, *rp;
+    if (!option->has_argument) {
+        option->data.flag.is_set = true;
+    }
+    else if ((*argv)[1]) {
+        (*argv)++;
+        option->data.arg.value = **argv;
+    }
+    else {
+        ft_fprintf(STDERR_FILENO, "ft_traceroute: option '--%s' requires an argument\n", long_opt);
+        return 1;
+    }
+
+    return 0;
+}
+
+int parse_args(int argc, char **argv) {
+    for (char **curr = argv + 1; *curr; curr++) {
+        int err;
+
+        if (ft_strlen(*curr) > 1 && (*curr)[0] == '-' && (*curr)[1] != '-') {
+            err = parse_short_option(&curr);
+        }
+        else if (ft_strlen(*curr) > 2 && (*curr)[0] == '-' && (*curr)[1] == '-' && (*curr)[2] != '-') {
+            err = parse_long_option(&curr);
+        }
+        else {
+            ft_printf("Host: %s\n", *curr);
+        }
+
+        if (err != 0) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+int main(int argc, char **argv) {
+    int err = parse_args(argc, argv);
+    if (err != 0) {
+        exit(EXIT_FAILURE);
+    }
+
+    struct addrinfo *res;
     struct addrinfo hints = {
         .ai_family = AF_INET,
         .ai_socktype = SOCK_DGRAM,
@@ -96,8 +163,7 @@ int main(int argc, char **argv)
     };
 
     int err_code = getaddrinfo(argv[1], NULL, &hints, &res);
-    if (err_code != 0)
-    {
+    if (err_code != 0) {
         ft_fprintf(STDERR_FILENO, "ft_traceroute: getaddrinfo: %s\n", gai_strerror(err_code));
         exit(EXIT_FAILURE);
     }
