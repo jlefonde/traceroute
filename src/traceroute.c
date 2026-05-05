@@ -9,6 +9,7 @@
 #include <stdbool.h>
 #include <errno.h>
 #include <arpa/inet.h>
+#include <sys/select.h>
 
 typedef struct s_option {
     const char short_opt;
@@ -29,9 +30,15 @@ typedef struct s_option {
 } t_option;
 
 typedef struct s_context {
-    struct in_addr *host;
+    struct sockaddr_storage *host_addr;
+    socklen_t host_addr_len;
     t_option *options;
 } t_context;
+
+void free_ctx(t_context *ctx) {
+    free(ctx->host_addr);
+    free(ctx);
+}
 
 static t_option *get_option_short(t_option *options, char opt) {
     for (size_t i = 0; options[i].short_opt; i++) {
@@ -175,7 +182,12 @@ static int parse_long_option(t_context *ctx, char ***argv) {
     return 0;
 }
 
-static struct in_addr *get_host_address(char *host_str) {
+static int set_host_address(t_context *ctx, char *host_str) {
+    if (!host_str) {
+        ft_fprintf(STDERR_FILENO, "error: missing \"host\" argument\n");
+        return 1;
+    }
+
     struct addrinfo *res;
     struct addrinfo hints = {
         .ai_family = AF_INET,
@@ -186,27 +198,20 @@ static struct in_addr *get_host_address(char *host_str) {
     int err_code = getaddrinfo(host_str, NULL, &hints, &res);
     if (err_code != 0) {
         ft_fprintf(STDERR_FILENO, "error: '%s': %s\n", host_str, gai_strerror(err_code));
-        return NULL;
-    }
-    
-    struct in_addr *host = malloc(sizeof(struct in_addr));
-    if (!host) {
-        ft_fprintf(STDERR_FILENO, "error: failed to retrieve host address: %s\n", strerror(errno));
-        return NULL;
-    }
-
-    *host = ((struct sockaddr_in *)res->ai_addr)->sin_addr;
-    freeaddrinfo(res);
-
-    return host;
-}
-
-static int set_host_address(t_context *ctx, char *host_str) {
-    ctx->host = get_host_address(host_str);
-    if (!ctx->host) {
         return 1;
     }
 
+    ctx->host_addr_len = res->ai_addrlen;
+    ctx->host_addr = malloc(ctx->host_addr_len);
+    if (!ctx->host_addr) {
+        ft_fprintf(STDERR_FILENO, "error: failed to allocate host address: %s\n", strerror(errno));
+        freeaddrinfo(res);
+        return 1;
+    }
+
+    ft_memcpy(ctx->host_addr, res->ai_addr, ctx->host_addr_len);
+    
+    freeaddrinfo(res);
     return 0;
 }
 
@@ -237,10 +242,7 @@ static int parse_args(t_context *ctx, int argc, char **argv) {
         }
     }
     
-    if (!host_str) {
-        ft_fprintf(STDERR_FILENO, "error: missing \"host\" argument\n");
-        return 1;
-    } else if (set_host_address(ctx, host_str) != 0) {
+    if (set_host_address(ctx, host_str) != 0) {
         return 1;
     }
 
@@ -260,11 +262,6 @@ static t_option *init_options() {
     return options;
 }
 
-void free_ctx(t_context *ctx) {
-    free(ctx->host);
-    free(ctx);
-}
-
 t_context *init_ctx(int argc, char **argv) {
     t_context *ctx = malloc(sizeof(t_context));
     if (!ctx) {
@@ -273,7 +270,7 @@ t_context *init_ctx(int argc, char **argv) {
     }
 
     ctx->options = init_options();
-    ctx->host = NULL;
+    ctx->host_addr = NULL;
 
     if (argc < 2) {
         print_helper(ctx->options);
@@ -300,7 +297,57 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    ft_printf("%s\n", inet_ntoa(*ctx->host));
+    int sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock_fd == -1) {
+        ft_fprintf(STDERR_FILENO, "error: failed to create socket: %s\n", strerror(errno));
+        free_ctx(ctx);
+        return 1;
+    }
+
+    struct sockaddr sock_addr;
+    memset(&sock_addr, 0, sizeof(sock_addr));
+
+    sock_addr.sa_family = AF_INET;
+    if (bind(sock_fd, (struct sockaddr *) &sock_addr, sizeof(sock_addr)) == -1) {
+        ft_fprintf(STDERR_FILENO, "error: failed to bind socket: %s\n", strerror(errno));
+        free_ctx(ctx);
+        return 1;
+    }
+
+    if (setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) == -1) {
+        ft_fprintf(STDERR_FILENO, "error: failed to set socket options: %s\n", strerror(errno));
+        free_ctx(ctx);
+        return 1;
+    }
+
+    struct sockaddr_in *host_addr = (struct sockaddr_in *)ctx->host_addr;
+    host_addr->sin_port = htons(33434);
+    ft_printf("%s\n", inet_ntoa(((struct sockaddr_in *)ctx->host_addr)->sin_addr));
+    ft_printf("%d\n", ntohs(host_addr->sin_port));
+
+    int ttl = 1;
+    if (setsockopt(sock_fd, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl)) == -1) {
+        ft_fprintf(STDERR_FILENO, "error: failed to set socket options: %s\n", strerror(errno));
+        free_ctx(ctx);
+        return 1;
+    }
+
+    char buf[5] = "test";
+    if (sendto(sock_fd, buf, 5, 0, (struct sockaddr *)host_addr, ctx->host_addr_len) == -1) {
+        ft_fprintf(STDERR_FILENO, "error: sendto failed: %s\n", strerror(errno));
+        free_ctx(ctx);
+        return 1;
+    }
+
+    fd_set read_fds;
+
+    FD_ZERO(&read_fds);
+
+    // int nfds = select(, , , NULL, );
+    // if (nfds == -1) {
+    //     ft_fprintf(STDERR_FILENO, "error: select failed: %s\n", strerror(errno));
+    // }
+
     free_ctx(ctx);
     return 0;
 }
