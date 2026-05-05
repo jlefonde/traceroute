@@ -1,71 +1,4 @@
-#define _POSIX_C_SOURCE 200112L
-
-#include "../libft/include/libft.h"
-#include <stdio.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netdb.h>
-#include <stdlib.h>
-#include <stdbool.h>
-#include <errno.h>
-#include <arpa/inet.h>
-#include <sys/select.h>
-#include <netinet/in.h>
-#include <netinet/ip.h>
-#include <netinet/ip_icmp.h>
-
-#define ICMP_FILTER 1
-
-typedef struct s_option {
-    const char short_opt;
-    const char *long_opt;
-    const char *description;
-    const bool has_argument;
-
-    union {
-        struct {
-            const char *meta;
-            char *value;
-        } arg;
-
-        struct {
-            bool is_set;
-        } flag;
-    } data;
-} t_option;
-
-typedef struct s_icmp {
-    uint8_t reply[1024];
-    size_t reply_len;
-    size_t reply_offset;
-
-    struct iphdr *ip_hdr;
-    struct icmphdr *hdr;
-
-    struct {
-        struct iphdr *ip_hdr;
-        struct {
-            uint16_t src_port;
-            uint16_t dst_port;
-        } udp;
-    } data;
-} t_icmp;
-
-typedef struct s_context {
-    struct sockaddr_storage *host_addr;
-    socklen_t host_addr_len;
-    t_option *options;
-
-    uint16_t port;
-    uint16_t current_port;
-    size_t current_ttl;
-    size_t max_ttl;
-    size_t queries;
-    size_t sim_queries;
-    size_t packet_len;
-
-    t_icmp icmp;
-} t_context;
+#include "../include/traceroute.h"
 
 void free_ctx(t_context *ctx) {
     free(ctx->host_addr);
@@ -92,52 +25,32 @@ static t_option *get_option_long(t_option *options, char *opt) {
     return NULL;
 }
 
-static void print_spaces(int count) {
-    while (count-- > 0) {
-        ft_printf(" ");
-    }
-}
-
 static void print_helper(t_option *options) {
-    ft_printf("usage: ./ft_traceroute <host> [options]\n");
-    ft_printf("options:\n");
+    printf("usage: ./ft_traceroute <host> [options]\n");
+    printf("options:\n");
 
     for (size_t i = 0; options[i].short_opt || (options[i].long_opt && options[i].long_opt[0]); i++) {
         int len = 0;
         
-        ft_printf("  ");
-        len += 2;
-        
-        if (options[i].short_opt) {
-            ft_printf("-%c", options[i].short_opt);
-            len += 2;
-            if (options[i].long_opt && options[i].long_opt[0]) {
-                ft_printf("  ");
-                len += 2;
-            }
+        if (options[i].short_opt && options[i].long_opt && options[i].long_opt[0]) {
+            len = printf("  -%c, --%s", options[i].short_opt, options[i].long_opt);
+        } else if (options[i].short_opt) {
+            len = printf("  -%c", options[i].short_opt);
         } else if (options[i].long_opt && options[i].long_opt[0]) {
-            ft_printf("    ");
-            len += 4;
-        }
-
-        if (options[i].long_opt && options[i].long_opt[0]) {
-            ft_printf("--%s", options[i].long_opt);
-            len += 2 + ft_strlen(options[i].long_opt);
+            len = printf("      --%s", options[i].long_opt);
         }
 
         if (options[i].has_argument && options[i].data.arg.meta) {
-            ft_printf(" <%s>", options[i].data.arg.meta);
-            len += 3 + ft_strlen(options[i].data.arg.meta);
+            len += printf(" <%s>", options[i].data.arg.meta);
         }
 
-        int pad = 24 - len;
-        if (pad > 0) {
-            print_spaces(pad);
+        if (len < 24) {
+            printf("%*s", 24 - len, "");
         } else {
-            ft_printf(" ");
+            printf(" ");
         }
 
-        ft_printf("%s\n", options[i].description ? options[i].description : "");
+        printf("%s\n", options[i].description ? options[i].description : "");
     }
 }
 
@@ -337,11 +250,9 @@ int process_icmp_time_exceeded(t_icmp *icmp) {
 
     icmp->reply_offset += inner_ip_len; 
 
-    uint16_t *inner_udp = (uint16_t *)(icmp->reply + icmp->reply_offset);
-    icmp->data.udp.src_port = ntohs(inner_udp[0]);
-    icmp->data.udp.dst_port = ntohs(inner_udp[1]);
+    icmp->data.udp_hdr = (struct udphdr *)(icmp->reply + icmp->reply_offset);
 
-    ft_printf("src=%d, dst=%d\n", icmp->data.udp.src_port, icmp->data.udp.dst_port);
+    printf("src=%d, dst=%d\n", ntohs(icmp->data.udp_hdr->source), ntohs(icmp->data.udp_hdr->dest));
     return 0;
 }
 
@@ -351,15 +262,15 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    int send_sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (send_sock_fd == -1) {
+    ctx->send_sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (ctx->send_sock_fd == -1) {
         ft_fprintf(STDERR_FILENO, "error: failed to create send socket: %s\n", strerror(errno));
         free_ctx(ctx);
         return 1;
     }
 
-    int recv_sock_fd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
-    if (recv_sock_fd == -1) {
+    ctx->recv_sock_fd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+    if (ctx->recv_sock_fd == -1) {
         ft_fprintf(STDERR_FILENO, "error: failed to create recv socket: %s\n", strerror(errno));
         free_ctx(ctx);
         return 1;
@@ -369,13 +280,13 @@ int main(int argc, char **argv) {
     ft_memset(&send_sock_addr, 0, sizeof(send_sock_addr));
 
     send_sock_addr.sa_family = AF_INET;
-    if (bind(send_sock_fd, (struct sockaddr *) &send_sock_addr, sizeof(send_sock_addr)) == -1) {
+    if (bind(ctx->send_sock_fd, (struct sockaddr *) &send_sock_addr, sizeof(send_sock_addr)) == -1) {
         ft_fprintf(STDERR_FILENO, "error: failed to bind send socket: %s\n", strerror(errno));
         free_ctx(ctx);
         return 1;
     }
 
-    if (setsockopt(send_sock_fd, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) == -1) {
+    if (setsockopt(ctx->send_sock_fd, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) == -1) {
         ft_fprintf(STDERR_FILENO, "error: failed to set send socket options: %s\n", strerror(errno));
         free_ctx(ctx);
         return 1;
@@ -385,7 +296,7 @@ int main(int argc, char **argv) {
     icmp_filter &= ~(1U << ICMP_DEST_UNREACH);
     icmp_filter &= ~(1U << ICMP_TIME_EXCEEDED);
 
-    if (setsockopt(recv_sock_fd, SOL_RAW, ICMP_FILTER, &icmp_filter, sizeof(icmp_filter)) == -1) {
+    if (setsockopt(ctx->recv_sock_fd, SOL_RAW, ICMP_FILTER, &icmp_filter, sizeof(icmp_filter)) == -1) {
         ft_fprintf(STDERR_FILENO, "error: failed to set recv socket options: %s\n", strerror(errno));
         free_ctx(ctx);
         return 1;
@@ -394,19 +305,19 @@ int main(int argc, char **argv) {
     struct sockaddr_in *host_addr = (struct sockaddr_in *)ctx->host_addr;
     host_addr->sin_port = htons(33434);
 
-    ft_printf("%s\n", inet_ntoa(((struct sockaddr_in *)ctx->host_addr)->sin_addr));
-    ft_printf("%d\n", ntohs(host_addr->sin_port));
+    printf("%s\n", inet_ntoa(((struct sockaddr_in *)ctx->host_addr)->sin_addr));
+    printf("%d\n", ntohs(host_addr->sin_port));
 
     int ttl = 1;
-    if (setsockopt(send_sock_fd, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl)) == -1) {
+    if (setsockopt(ctx->send_sock_fd, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl)) == -1) {
         ft_fprintf(STDERR_FILENO, "error: failed to set send socket options: %s\n", strerror(errno));
         free_ctx(ctx);
         return 1;
     }
 
     char buf[35] = "testtesttesttesttest";
-    if (sendto(send_sock_fd, buf, 35, 0, (struct sockaddr *)host_addr, ctx->host_addr_len) == -1) {
-        ft_fprintf(STDERR_FILENO, "error: sendto failed: %s\n", strerror(errno));
+    if (sendto(ctx->send_sock_fd, buf, 35, 0, (struct sockaddr *)host_addr, ctx->host_addr_len) == -1) {
+        ft_fprintf(STDERR_FILENO, "error: failed to send probe: %s\n", strerror(errno));
         free_ctx(ctx);
         return 1;
     }
@@ -414,19 +325,19 @@ int main(int argc, char **argv) {
     fd_set read_fds;
 
     FD_ZERO(&read_fds);
-    FD_SET(recv_sock_fd, &read_fds);
+    FD_SET(ctx->recv_sock_fd, &read_fds);
     
     struct timeval  tv;
     tv.tv_sec = 5;
     tv.tv_usec = 0;
 
-    int nfds = select(recv_sock_fd + 1, &read_fds, NULL, NULL, &tv);
+    int nfds = select(ctx->recv_sock_fd + 1, &read_fds, NULL, NULL, &tv);
     if (nfds == -1) {
         ft_fprintf(STDERR_FILENO, "error: select failed: %s\n", strerror(errno));
     } else if (nfds > 0) {
-        if (FD_ISSET(recv_sock_fd, &read_fds)) {
+        if (FD_ISSET(ctx->recv_sock_fd, &read_fds)) {
             t_icmp *icmp = &ctx->icmp;
-            ssize_t bytes_received = recvfrom(recv_sock_fd, icmp->reply, sizeof(icmp->reply), 0, NULL, NULL);
+            ssize_t bytes_received = recvfrom(ctx->recv_sock_fd, icmp->reply, sizeof(icmp->reply), 0, NULL, NULL);
 
             if (bytes_received > 0) {
                 icmp->reply_len = bytes_received;
@@ -453,7 +364,7 @@ int main(int argc, char **argv) {
             }
         }
     } else {
-      ft_printf("nothing\n");
+      printf("nothing\n");
     }
 
     free_ctx(ctx);
