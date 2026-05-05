@@ -10,6 +10,11 @@
 #include <errno.h>
 #include <arpa/inet.h>
 #include <sys/select.h>
+#include <netinet/in.h>
+#include <netinet/ip.h>
+#include <netinet/ip_icmp.h>
+
+#define ICMP_FILTER 1
 
 typedef struct s_option {
     const char short_opt;
@@ -33,6 +38,13 @@ typedef struct s_context {
     struct sockaddr_storage *host_addr;
     socklen_t host_addr_len;
     t_option *options;
+
+    uint16_t current_port;
+    size_t current_ttl;
+    size_t max_ttl;
+    size_t queries;
+    size_t sim_queries;
+    size_t packet_len;
 } t_context;
 
 void free_ctx(t_context *ctx) {
@@ -291,49 +303,90 @@ t_context *init_ctx(int argc, char **argv) {
     return ctx;
 }
 
+int process_icmp_time_exceeded(unsigned char *icmp_msg, ssize_t icmp_msg_len, size_t icmp_offset) {
+    if (icmp_msg_len < (ssize_t)(icmp_offset + sizeof(struct iphdr))) {
+        return 1;
+    }
+
+    struct iphdr *inner_ip = (struct iphdr *)(icmp_msg + icmp_offset);
+    size_t inner_ip_len = inner_ip->ihl * 4;
+
+    if (icmp_msg_len < (ssize_t)(icmp_offset + inner_ip_len + 8)) {
+        return 1;
+    }
+
+    icmp_offset += inner_ip_len; 
+
+    uint16_t *inner_udp = (uint16_t *)(icmp_msg + icmp_offset);
+    uint16_t src_port = ntohs(inner_udp[0]);
+    uint16_t dst_port = ntohs(inner_udp[1]);
+
+    ft_printf("src=%d, dst=%d\n", src_port, dst_port);
+
+    return 0;
+}
+
 int main(int argc, char **argv) {
     t_context *ctx = init_ctx(argc, argv);
     if (!ctx) {
         return 1;
     }
 
-    int sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sock_fd == -1) {
-        ft_fprintf(STDERR_FILENO, "error: failed to create socket: %s\n", strerror(errno));
+    int send_sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (send_sock_fd == -1) {
+        ft_fprintf(STDERR_FILENO, "error: failed to create send socket: %s\n", strerror(errno));
         free_ctx(ctx);
         return 1;
     }
 
-    struct sockaddr sock_addr;
-    memset(&sock_addr, 0, sizeof(sock_addr));
-
-    sock_addr.sa_family = AF_INET;
-    if (bind(sock_fd, (struct sockaddr *) &sock_addr, sizeof(sock_addr)) == -1) {
-        ft_fprintf(STDERR_FILENO, "error: failed to bind socket: %s\n", strerror(errno));
+    int recv_sock_fd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+    if (recv_sock_fd == -1) {
+        ft_fprintf(STDERR_FILENO, "error: failed to create recv socket: %s\n", strerror(errno));
         free_ctx(ctx);
         return 1;
     }
 
-    if (setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) == -1) {
-        ft_fprintf(STDERR_FILENO, "error: failed to set socket options: %s\n", strerror(errno));
+    struct sockaddr send_sock_addr;
+    ft_memset(&send_sock_addr, 0, sizeof(send_sock_addr));
+
+    send_sock_addr.sa_family = AF_INET;
+    if (bind(send_sock_fd, (struct sockaddr *) &send_sock_addr, sizeof(send_sock_addr)) == -1) {
+        ft_fprintf(STDERR_FILENO, "error: failed to bind send socket: %s\n", strerror(errno));
+        free_ctx(ctx);
+        return 1;
+    }
+
+    if (setsockopt(send_sock_fd, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) == -1) {
+        ft_fprintf(STDERR_FILENO, "error: failed to set send socket options: %s\n", strerror(errno));
+        free_ctx(ctx);
+        return 1;
+    }
+
+    unsigned int icmp_filter = ~0U;
+    icmp_filter &= ~(1U << ICMP_DEST_UNREACH);
+    icmp_filter &= ~(1U << ICMP_TIME_EXCEEDED);
+
+    if (setsockopt(recv_sock_fd, SOL_RAW, ICMP_FILTER, &icmp_filter, sizeof(icmp_filter)) == -1) {
+        ft_fprintf(STDERR_FILENO, "error: failed to set recv socket options: %s\n", strerror(errno));
         free_ctx(ctx);
         return 1;
     }
 
     struct sockaddr_in *host_addr = (struct sockaddr_in *)ctx->host_addr;
     host_addr->sin_port = htons(33434);
+
     ft_printf("%s\n", inet_ntoa(((struct sockaddr_in *)ctx->host_addr)->sin_addr));
     ft_printf("%d\n", ntohs(host_addr->sin_port));
 
     int ttl = 1;
-    if (setsockopt(sock_fd, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl)) == -1) {
-        ft_fprintf(STDERR_FILENO, "error: failed to set socket options: %s\n", strerror(errno));
+    if (setsockopt(send_sock_fd, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl)) == -1) {
+        ft_fprintf(STDERR_FILENO, "error: failed to set send socket options: %s\n", strerror(errno));
         free_ctx(ctx);
         return 1;
     }
 
-    char buf[5] = "test";
-    if (sendto(sock_fd, buf, 5, 0, (struct sockaddr *)host_addr, ctx->host_addr_len) == -1) {
+    char buf[35] = "testtesttesttesttest";
+    if (sendto(send_sock_fd, buf, 35, 0, (struct sockaddr *)host_addr, ctx->host_addr_len) == -1) {
         ft_fprintf(STDERR_FILENO, "error: sendto failed: %s\n", strerror(errno));
         free_ctx(ctx);
         return 1;
@@ -342,11 +395,52 @@ int main(int argc, char **argv) {
     fd_set read_fds;
 
     FD_ZERO(&read_fds);
+    FD_SET(recv_sock_fd, &read_fds);
+    
+    struct timeval  tv;
+    tv.tv_sec = 5;
+    tv.tv_usec = 0;
 
-    // int nfds = select(, , , NULL, );
-    // if (nfds == -1) {
-    //     ft_fprintf(STDERR_FILENO, "error: select failed: %s\n", strerror(errno));
-    // }
+    int nfds = select(recv_sock_fd + 1, &read_fds, NULL, NULL, &tv);
+    if (nfds == -1) {
+        ft_fprintf(STDERR_FILENO, "error: select failed: %s\n", strerror(errno));
+    } else if (nfds > 0) {
+        if (FD_ISSET(recv_sock_fd, &read_fds)) {
+            unsigned char icmp_msg[576];
+            ssize_t icmp_msg_len = recvfrom(recv_sock_fd, icmp_msg, sizeof(icmp_msg), 0, NULL, NULL);
+
+            ft_printf("bytes_recv: %d\n", icmp_msg_len);
+            if (icmp_msg_len > 0) {
+                size_t ip_hdr_len = sizeof(struct iphdr);
+                size_t icmp_hdr_len = sizeof(struct icmphdr);
+                size_t icmp_offset = 0;
+
+                if (icmp_msg_len < (ssize_t)ip_hdr_len) {
+                    return 1;
+                }
+
+                icmp_offset += ip_hdr_len;
+
+                struct iphdr *ip_hdr = (struct iphdr *)icmp_msg;
+
+                if (icmp_msg_len < (ssize_t)(ip_hdr_len + icmp_hdr_len)) {
+                    return 1;
+                }
+
+                icmp_offset += icmp_hdr_len;
+
+                struct icmphdr *icmp_hdr = (struct icmphdr *)(icmp_msg + ip_hdr_len);
+
+                if (icmp_hdr->type == ICMP_TIME_EXCEEDED && process_icmp_time_exceeded(icmp_msg, icmp_msg_len, icmp_offset) != 0) {
+                    return 1;
+                } else if (icmp_hdr->type == ICMP_DEST_UNREACH) {
+
+                }
+            }
+        }
+    } else {
+      ft_printf("nothing\n");
+    }
 
     free_ctx(ctx);
     return 0;
