@@ -34,17 +34,37 @@ typedef struct s_option {
     } data;
 } t_option;
 
+typedef struct s_icmp {
+    uint8_t reply[1024];
+    size_t reply_len;
+    size_t reply_offset;
+
+    struct iphdr *ip_hdr;
+    struct icmphdr *hdr;
+
+    struct {
+        struct iphdr *ip_hdr;
+        struct {
+            uint16_t src_port;
+            uint16_t dst_port;
+        } udp;
+    } data;
+} t_icmp;
+
 typedef struct s_context {
     struct sockaddr_storage *host_addr;
     socklen_t host_addr_len;
     t_option *options;
 
+    uint16_t port;
     uint16_t current_port;
     size_t current_ttl;
     size_t max_ttl;
     size_t queries;
     size_t sim_queries;
     size_t packet_len;
+
+    t_icmp icmp;
 } t_context;
 
 void free_ctx(t_context *ctx) {
@@ -303,26 +323,25 @@ t_context *init_ctx(int argc, char **argv) {
     return ctx;
 }
 
-int process_icmp_time_exceeded(unsigned char *icmp_msg, ssize_t icmp_msg_len, size_t icmp_offset) {
-    if (icmp_msg_len < (ssize_t)(icmp_offset + sizeof(struct iphdr))) {
+int process_icmp_time_exceeded(t_icmp *icmp) {
+    if (icmp->reply_len < (ssize_t)(icmp->reply_offset + sizeof(struct iphdr))) {
         return 1;
     }
 
-    struct iphdr *inner_ip = (struct iphdr *)(icmp_msg + icmp_offset);
-    size_t inner_ip_len = inner_ip->ihl * 4;
+    icmp->data.ip_hdr = (struct iphdr *)(icmp->reply + icmp->reply_offset);
+    size_t inner_ip_len = icmp->data.ip_hdr->ihl * 4;
 
-    if (icmp_msg_len < (ssize_t)(icmp_offset + inner_ip_len + 8)) {
+    if (icmp->reply_len < (ssize_t)(icmp->reply_offset + inner_ip_len + 8)) {
         return 1;
     }
 
-    icmp_offset += inner_ip_len; 
+    icmp->reply_offset += inner_ip_len; 
 
-    uint16_t *inner_udp = (uint16_t *)(icmp_msg + icmp_offset);
-    uint16_t src_port = ntohs(inner_udp[0]);
-    uint16_t dst_port = ntohs(inner_udp[1]);
+    uint16_t *inner_udp = (uint16_t *)(icmp->reply + icmp->reply_offset);
+    icmp->data.udp.src_port = ntohs(inner_udp[0]);
+    icmp->data.udp.dst_port = ntohs(inner_udp[1]);
 
-    ft_printf("src=%d, dst=%d\n", src_port, dst_port);
-
+    ft_printf("src=%d, dst=%d\n", icmp->data.udp.src_port, icmp->data.udp.dst_port);
     return 0;
 }
 
@@ -406,34 +425,29 @@ int main(int argc, char **argv) {
         ft_fprintf(STDERR_FILENO, "error: select failed: %s\n", strerror(errno));
     } else if (nfds > 0) {
         if (FD_ISSET(recv_sock_fd, &read_fds)) {
-            unsigned char icmp_msg[576];
-            ssize_t icmp_msg_len = recvfrom(recv_sock_fd, icmp_msg, sizeof(icmp_msg), 0, NULL, NULL);
+            t_icmp *icmp = &ctx->icmp;
+            ssize_t bytes_received = recvfrom(recv_sock_fd, icmp->reply, sizeof(icmp->reply), 0, NULL, NULL);
 
-            ft_printf("bytes_recv: %d\n", icmp_msg_len);
-            if (icmp_msg_len > 0) {
-                size_t ip_hdr_len = sizeof(struct iphdr);
-                size_t icmp_hdr_len = sizeof(struct icmphdr);
-                size_t icmp_offset = 0;
+            if (bytes_received > 0) {
+                icmp->reply_len = bytes_received;
 
-                if (icmp_msg_len < (ssize_t)ip_hdr_len) {
+                if (icmp->reply_len < sizeof(struct iphdr)) {
                     return 1;
                 }
 
-                icmp_offset += ip_hdr_len;
+                icmp->ip_hdr = (struct iphdr *)icmp->reply;
+                size_t actual_ip_len = icmp->ip_hdr->ihl * 4;
 
-                struct iphdr *ip_hdr = (struct iphdr *)icmp_msg;
-
-                if (icmp_msg_len < (ssize_t)(ip_hdr_len + icmp_hdr_len)) {
+                if (icmp->reply_len < actual_ip_len + sizeof(struct icmphdr)) {
                     return 1;
                 }
 
-                icmp_offset += icmp_hdr_len;
+                icmp->hdr = (struct icmphdr *)(icmp->reply + actual_ip_len);
+                icmp->reply_offset = actual_ip_len + sizeof(struct icmphdr);
 
-                struct icmphdr *icmp_hdr = (struct icmphdr *)(icmp_msg + ip_hdr_len);
-
-                if (icmp_hdr->type == ICMP_TIME_EXCEEDED && process_icmp_time_exceeded(icmp_msg, icmp_msg_len, icmp_offset) != 0) {
+                if (icmp->hdr->type == ICMP_TIME_EXCEEDED && process_icmp_time_exceeded(icmp) != 0) {
                     return 1;
-                } else if (icmp_hdr->type == ICMP_DEST_UNREACH) {
+                } else if (icmp->hdr->type == ICMP_DEST_UNREACH) {
 
                 }
             }
