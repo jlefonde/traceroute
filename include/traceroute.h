@@ -17,6 +17,7 @@
 # include <netinet/ip.h>
 # include <netinet/udp.h>
 # include <netinet/ip_icmp.h>
+# include <sys/time.h>
 
 # define ICMP_FILTER 1
 
@@ -52,6 +53,22 @@ typedef struct s_icmp {
     } data;
 } t_icmp;
 
+typedef struct s_probe {
+    bool is_active;
+    size_t ttl;
+    uint16_t dst_port;
+    struct timeval send_time;
+
+    struct in_addr icmp_reply_addr;
+    struct timeval rtt;
+} t_probe;
+
+typedef struct s_hop {
+    size_t ttl;
+
+    t_probe *probes;
+} t_hop;
+
 typedef struct s_context {
     struct sockaddr_storage *host_addr;
     socklen_t host_addr_len;
@@ -68,6 +85,9 @@ typedef struct s_context {
     int send_sock_fd;
     int recv_sock_fd;
     t_icmp icmp;
+    
+    t_probe *active_probes;
+    t_hop *hops;
 } t_context;
 
 #endif
