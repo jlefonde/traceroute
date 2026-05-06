@@ -5,7 +5,9 @@ void free_ctx(t_context *ctx) {
     free(ctx->active_probes);
 
     if (ctx->hops) {
-        free(ctx->hops->probes);
+        for (size_t i = 0; i < ctx->max_ttl; i++) {
+            free(ctx->hops[i].replies);
+        }
         free(ctx->hops);
     }
 
@@ -88,7 +90,7 @@ static int parse_short_option(t_context *ctx, char ***argv) {
         t_option *option = get_option_short(ctx->options, short_opt);
         if (!option) {
             fprintf(stderr, "error: bad option '-%c'\n", short_opt);
-            return 1;
+            return -1;
         }
 
         if (!option->has_argument) {
@@ -102,7 +104,7 @@ static int parse_short_option(t_context *ctx, char ***argv) {
         }
         else {
             fprintf(stderr, "error: option '-%c' requires an argument\n", short_opt);
-            return 1;
+            return -1;
         }
     }
 
@@ -116,7 +118,7 @@ static int parse_long_option(t_context *ctx, char ***argv) {
     t_option *option = get_option_long(ctx->options, long_opt);
     if (!option) {
         fprintf(stderr, "error: bad option '--%s'\n", long_opt);
-        return 1;
+        return -1;
     }
 
     if (!option->has_argument) {
@@ -128,7 +130,7 @@ static int parse_long_option(t_context *ctx, char ***argv) {
     }
     else {
         fprintf(stderr, "error: option '--%s' requires an argument\n", long_opt);
-        return 1;
+        return -1;
     }
 
     return 0;
@@ -137,7 +139,7 @@ static int parse_long_option(t_context *ctx, char ***argv) {
 static int set_host_address(t_context *ctx, char *host_str) {
     if (!host_str) {
         fprintf(stderr, "error: missing \"host\" argument\n");
-        return 1;
+        return -1;
     }
 
     struct addrinfo *res;
@@ -150,7 +152,7 @@ static int set_host_address(t_context *ctx, char *host_str) {
     int err_code = getaddrinfo(host_str, NULL, &hints, &res);
     if (err_code != 0) {
         fprintf(stderr, "error: '%s': %s\n", host_str, gai_strerror(err_code));
-        return 1;
+        return -1;
     }
 
     ctx->host_addr_len = res->ai_addrlen;
@@ -158,7 +160,7 @@ static int set_host_address(t_context *ctx, char *host_str) {
     if (!ctx->host_addr) {
         fprintf(stderr, "error: failed to allocate host address: %s\n", strerror(errno));
         freeaddrinfo(res);
-        return 1;
+        return -1;
     }
 
     if (res->ai_family == AF_INET) {
@@ -193,16 +195,16 @@ static int parse_args(t_context *ctx, int argc, char **argv) {
             host_str = *arg;
         } else {
             fprintf(stderr, "error: extra argument '%s'\n", *arg);
-            return 1;
+            return -1;
         }
 
         if (err != 0) {
-            return 1;
+            return -1;
         }
     }
     
     if (set_host_address(ctx, host_str) != 0) {
-        return 1;
+        return -1;
     }
 
     return 0;
@@ -267,11 +269,13 @@ t_context *init_ctx(int argc, char **argv) {
         return NULL;
     }
 
-    ctx->hops->probes = malloc(sizeof(t_probe) * ctx->queries);
-    if (!ctx->hops) {
-        fprintf(stderr, "error: failed to allocate hops' probes: %s\n", strerror(errno));
-        free_ctx(ctx);
-        return NULL;
+    for (size_t i = 0; i < ctx->max_ttl; i++) {
+        ctx->hops[i].replies = malloc(sizeof(t_icmp) * ctx->queries);
+        if (!ctx->hops[i].replies) {
+             fprintf(stderr, "error: failed to allocate hops' replies: %s\n", strerror(errno));
+             free_ctx(ctx);
+             return NULL;
+        }
     }
 
     return ctx;
@@ -279,14 +283,14 @@ t_context *init_ctx(int argc, char **argv) {
 
 int parse_icmp_payload(t_icmp *icmp) {
     if (icmp->reply_len < (ssize_t)(icmp->reply_offset + sizeof(struct iphdr))) {
-        return 1;
+        return -1;
     }
 
     icmp->data.ip_hdr = (struct iphdr *)(icmp->reply + icmp->reply_offset);
     size_t inner_ip_len = icmp->data.ip_hdr->ihl * 4;
 
     if (icmp->reply_len < (ssize_t)(icmp->reply_offset + inner_ip_len + 8)) {
-        return 1;
+        return -1;
     }
 
     icmp->reply_offset += inner_ip_len; 
@@ -320,19 +324,16 @@ int send_probe(t_context *ctx) {
     struct sockaddr_in *host_addr = (struct sockaddr_in *)ctx->host_addr;
     host_addr->sin_port = htons(probe.dst_port);
 
-    printf("%s\n", inet_ntoa(((struct sockaddr_in *)ctx->host_addr)->sin_addr));
-    printf("%d\n", probe.dst_port);
-
     if (setsockopt(ctx->send_sock_fd, IPPROTO_IP, IP_TTL, &probe.ttl, sizeof(probe.ttl)) == -1) {
         fprintf(stderr, "error: failed to set socket TTL: %s\n", strerror(errno));
-        return 1;
+        return -1;
     }
 
     size_t payload_len = ctx->packet_len - sizeof(struct iphdr) - sizeof(struct udphdr);
     uint8_t *payload = malloc(sizeof(uint8_t) * payload_len);
     if (!payload) {
         fprintf(stderr, "error: failed to allocate payload: %s\n", strerror(errno));
-        return 1;
+        return -1;
     }
 
     ft_memset(payload, 0, payload_len);
@@ -346,12 +347,10 @@ int send_probe(t_context *ctx) {
     if (bytes_sent == -1) {
         fprintf(stderr, "error: failed to send probe: %s\n", strerror(errno));
         free_ctx(ctx);
-        return 1;
+        return -1;
     }
 
     ctx->active_probes[active_probes_idx] = probe;
-    
-    printf("bytes sent: %ld\n", bytes_sent);
 }
 
 const char *get_icmp_dest_unreach_annotation(uint8_t code) {
@@ -369,24 +368,42 @@ const char *get_icmp_dest_unreach_annotation(uint8_t code) {
     }
 }
 
+int parse_icmp_hdr(t_icmp *icmp) {
+    if (icmp->reply_len < sizeof(struct iphdr)) {
+        return -1;
+    }
+
+    icmp->ip_hdr = (struct iphdr *)icmp->reply;
+    size_t actual_ip_len = icmp->ip_hdr->ihl * 4;
+
+    if (icmp->reply_len < actual_ip_len + sizeof(struct icmphdr)) {
+        return -1;
+    }
+
+    icmp->hdr = (struct icmphdr *)(icmp->reply + actual_ip_len);
+    icmp->reply_offset = actual_ip_len + sizeof(struct icmphdr);
+
+    return 0;
+}
+
 int main(int argc, char **argv) {
     t_context *ctx = init_ctx(argc, argv);
     if (!ctx) {
-        return 1;
+        return -1;
     }
 
     ctx->send_sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (ctx->send_sock_fd == -1) {
         fprintf(stderr, "error: failed to create send socket: %s\n", strerror(errno));
         free_ctx(ctx);
-        return 1;
+        return -1;
     }
 
     ctx->recv_sock_fd = socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
     if (ctx->recv_sock_fd == -1) {
         fprintf(stderr, "error: failed to create recv socket: %s\n", strerror(errno));
         free_ctx(ctx);
-        return 1;
+        return -1;
     }
 
     struct sockaddr send_sock_addr;
@@ -396,13 +413,13 @@ int main(int argc, char **argv) {
     if (bind(ctx->send_sock_fd, (struct sockaddr *) &send_sock_addr, sizeof(send_sock_addr)) == -1) {
         fprintf(stderr, "error: failed to bind send socket: %s\n", strerror(errno));
         free_ctx(ctx);
-        return 1;
+        return -1;
     }
 
     if (setsockopt(ctx->send_sock_fd, SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) == -1) {
         fprintf(stderr, "error: failed to set send socket options: %s\n", strerror(errno));
         free_ctx(ctx);
-        return 1;
+        return -1;
     }
 
     unsigned int icmp_filter = ~0U;
@@ -412,54 +429,39 @@ int main(int argc, char **argv) {
     if (setsockopt(ctx->recv_sock_fd, SOL_RAW, ICMP_FILTER, &icmp_filter, sizeof(icmp_filter)) == -1) {
         fprintf(stderr, "error: failed to set recv socket options: %s\n", strerror(errno));
         free_ctx(ctx);
-        return 1;
+        return -1;
     }
 
-    send_probe(ctx);
-
     fd_set read_fds;
-
     FD_ZERO(&read_fds);
     FD_SET(ctx->recv_sock_fd, &read_fds);
     
-    struct timeval  tv;
-    tv.tv_sec = 5;
-    tv.tv_usec = 0;
+    struct timeval timeout;
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 50000;
 
-    int nfds = select(ctx->recv_sock_fd + 1, &read_fds, NULL, NULL, &tv);
-    if (nfds == -1) {
-        fprintf(stderr, "error: select failed: %s\n", strerror(errno));
-    } else if (nfds > 0) {
-        if (FD_ISSET(ctx->recv_sock_fd, &read_fds)) {
-            t_icmp *icmp = &ctx->icmp;
-            ssize_t bytes_received = recvfrom(ctx->recv_sock_fd, icmp->reply, sizeof(icmp->reply), 0, NULL, NULL);
+    char *host_sock_addr = inet_ntoa(((struct sockaddr_in *)ctx->host_addr)->sin_addr);
+    printf("traceroute to %s (%s), %ld hops max, %ld bytes packets\n", host_sock_addr, host_sock_addr, ctx->max_ttl, ctx->packet_len);
+    send_probe(ctx);
 
-            printf("bytes_received: %d\n", bytes_received);
-            if (bytes_received > 0) {
-                icmp->reply_len = bytes_received;
+    while (1) {
+        int nfds = select(ctx->recv_sock_fd + 1, &read_fds, NULL, NULL, &timeout);
+        if (nfds == -1) {
+            fprintf(stderr, "error: select failed: %s\n", strerror(errno));
+        } else if (nfds > 0) {
+            if (FD_ISSET(ctx->recv_sock_fd, &read_fds)) {
+                t_icmp *icmp = &ctx->icmp;
+                ssize_t bytes_received = recvfrom(ctx->recv_sock_fd, icmp->reply, sizeof(icmp->reply), 0, NULL, NULL);
 
-                if (icmp->reply_len < sizeof(struct iphdr)) {
-                    return 1;
+                if (bytes_received > 0) {
+                    icmp->reply_len = bytes_received;
+
+                    if (parse_icmp_hdr(icmp) != 0 || parse_icmp_payload(icmp) != 0) {
+                        return -1;
+                    }
+
+                    printf("src=%d, dst=%d\n", ntohs(icmp->data.udp_hdr->source),  ntohs(icmp->data.udp_hdr->dest));
                 }
-
-                icmp->ip_hdr = (struct iphdr *)icmp->reply;
-                size_t actual_ip_len = icmp->ip_hdr->ihl * 4;
-                
-                struct in_addr router_addr = { icmp->ip_hdr->saddr };
-                printf("%s\n", inet_ntoa(router_addr));
-
-                if (icmp->reply_len < actual_ip_len + sizeof(struct icmphdr)) {
-                    return 1;
-                }
-
-                icmp->hdr = (struct icmphdr *)(icmp->reply + actual_ip_len);
-                icmp->reply_offset = actual_ip_len + sizeof(struct icmphdr);
-
-                if (parse_icmp_payload(icmp) != 0) {
-                    return 1;
-                }
-
-                printf("src=%d, dst=%d\n", ntohs(icmp->data.udp_hdr->source),  ntohs(icmp->data.udp_hdr->dest));
             }
         }
     }

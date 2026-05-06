@@ -55,18 +55,17 @@ typedef struct s_icmp {
 
 typedef struct s_probe {
     bool is_active;
+
     size_t ttl;
     uint16_t dst_port;
     struct timeval send_time;
-
-    struct in_addr icmp_reply_addr;
-    struct timeval rtt;
 } t_probe;
 
 typedef struct s_hop {
     size_t ttl;
+    struct timeval rtt;
 
-    t_probe *probes;
+    t_icmp *replies;
 } t_hop;
 
 typedef struct s_context {
