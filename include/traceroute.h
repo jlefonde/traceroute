@@ -89,4 +89,7 @@ typedef struct s_context {
     t_hop *hops;
 } t_context;
 
+int parse_args(t_context *ctx, int argc, char **argv);
+void print_helper(t_option *options);
+
 #endif
