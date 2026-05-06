@@ -277,7 +277,7 @@ t_context *init_ctx(int argc, char **argv) {
     return ctx;
 }
 
-int process_icmp_time_exceeded(t_icmp *icmp) {
+int parse_icmp_payload(t_icmp *icmp) {
     if (icmp->reply_len < (ssize_t)(icmp->reply_offset + sizeof(struct iphdr))) {
         return 1;
     }
@@ -291,8 +291,6 @@ int process_icmp_time_exceeded(t_icmp *icmp) {
 
     icmp->reply_offset += inner_ip_len; 
     icmp->data.udp_hdr = (struct udphdr *)(icmp->reply + icmp->reply_offset);
-
-    printf("src=%d, dst=%d\n", ntohs(icmp->data.udp_hdr->source), ntohs(icmp->data.udp_hdr->dest));
  
     return 0;
 }
@@ -323,7 +321,7 @@ int send_probe(t_context *ctx) {
     host_addr->sin_port = htons(probe.dst_port);
 
     printf("%s\n", inet_ntoa(((struct sockaddr_in *)ctx->host_addr)->sin_addr));
-    printf("%d\n", ntohs(probe.dst_port));
+    printf("%d\n", probe.dst_port);
 
     if (setsockopt(ctx->send_sock_fd, IPPROTO_IP, IP_TTL, &probe.ttl, sizeof(probe.ttl)) == -1) {
         fprintf(stderr, "error: failed to set socket TTL: %s\n", strerror(errno));
@@ -338,13 +336,10 @@ int send_probe(t_context *ctx) {
     }
 
     ft_memset(payload, 0, payload_len);
-
     if (gettimeofday(&probe.send_time, NULL) == -1) {
 
     }
 
-    printf("%ld\n", probe.send_time.tv_sec);
-    printf("timeval %ld\n", sizeof(struct timeval));
     ft_memcpy(payload, &probe.send_time, sizeof(struct timeval));
 
     ssize_t bytes_sent = sendto(ctx->send_sock_fd, payload, payload_len, 0, (struct sockaddr *)host_addr, ctx->host_addr_len);
@@ -357,6 +352,21 @@ int send_probe(t_context *ctx) {
     ctx->active_probes[active_probes_idx] = probe;
     
     printf("bytes sent: %ld\n", bytes_sent);
+}
+
+const char *get_icmp_dest_unreach_annotation(uint8_t code) {
+    switch (code) {
+        case ICMP_NET_UNREACH: return "!N";
+        case ICMP_HOST_UNREACH: return "!H";
+        case ICMP_PROT_UNREACH: return "!P";
+        case ICMP_FRAG_NEEDED: return "!F";
+        case ICMP_SR_FAILED: return "!S";
+        case ICMP_PKT_FILTERED: return "!X";
+        case ICMP_PREC_VIOLATION: return "!V";
+        case ICMP_PREC_CUTOFF: return "!C";
+        case ICMP_PORT_UNREACH: return "";
+        default: return NULL;
+    }
 }
 
 int main(int argc, char **argv) {
@@ -442,20 +452,14 @@ int main(int argc, char **argv) {
                     return 1;
                 }
 
-                struct timeval tv;
-                ft_memcpy(&tv, icmp->reply + 56, 16);
-
-
-                printf("%ld\n", tv.tv_sec);
-
                 icmp->hdr = (struct icmphdr *)(icmp->reply + actual_ip_len);
                 icmp->reply_offset = actual_ip_len + sizeof(struct icmphdr);
 
-                if (icmp->hdr->type == ICMP_TIME_EXCEEDED && process_icmp_time_exceeded(icmp) != 0) {
+                if (parse_icmp_payload(icmp) != 0) {
                     return 1;
-                } else if (icmp->hdr->type == ICMP_DEST_UNREACH) {
-
                 }
+
+                printf("src=%d, dst=%d\n", ntohs(icmp->data.udp_hdr->source),  ntohs(icmp->data.udp_hdr->dest));
             }
         }
     }
