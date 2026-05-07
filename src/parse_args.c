@@ -1,4 +1,4 @@
-#include "../include/traceroute.h"
+#include "traceroute.h"
 
 static t_option *get_option_short(t_option *options, char opt) {
     for (size_t i = 0; options[i].short_opt; i++) {
@@ -161,8 +161,15 @@ void print_helper(t_option *options) {
 }
 
 int parse_args(t_context *ctx, int argc, char **argv) {
+    if (argc < 2) {
+        print_helper(ctx->options);
+        return -1;
+    }
+
     if (check_helper(argv)) {
-        return 2;
+        print_helper(ctx->options);
+        free_ctx(ctx);
+        exit(EXIT_SUCCESS);
     }
 
     char *host_str = NULL;

@@ -4,7 +4,7 @@ SOURCES_DIR = src
 HEADERS_DIR = include
 OBJECTS_DIR = objs
 
-SOURCES = traceroute.c parse_args.c
+SOURCES = traceroute.c parse_args.c socket.c icmp.c
 
 OBJECTS = $(addprefix $(OBJECTS_DIR)/, $(SOURCES:.c=.o))
 
