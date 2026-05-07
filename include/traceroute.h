@@ -3,6 +3,7 @@
 
 # define _POSIX_C_SOURCE 200112L
 # define ROOT_UID 0
+# define ICMP_REPLY_MAX_LEN 576
 
 # include "../libft/include/libft.h"
 # include <stdio.h>
@@ -53,6 +54,8 @@ typedef struct s_icmp {
     struct {
         struct iphdr ip_hdr;
         struct udphdr udp_hdr;
+        uint8_t *probe_payload;
+        size_t probe_payload_len;
     } data;
 } t_icmp;
 

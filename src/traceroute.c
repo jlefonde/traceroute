@@ -20,6 +20,8 @@ void free_ctx(t_context *ctx) {
         free(ctx->hops);
     }
 
+    close(ctx->udp_sock->fd);
+    close(ctx->icmp_sock->fd);
     free(ctx);
 }
 
@@ -128,19 +130,22 @@ int send_probe(t_context *ctx) {
         return -1;
     }
 
-    ft_memset(payload, 0, payload_len);
+    pid_t pid = getpid();
+    ft_memcpy(payload, &pid, sizeof(pid));
+    printf("pid=%d\n", pid);
+
     if (gettimeofday(&probe.send_time, NULL) == -1) {
         fprintf(stderr, "error: failed to retrieve timestamp: %s\n", strerror(errno));
         return -1;
     }
 
-    ft_memcpy(payload, &probe.send_time, sizeof(struct timeval));
-    ssize_t bytes_sent = sendto(ctx->udp_sock->fd , payload, payload_len, 0, (struct sockaddr *)host_addr, ctx->host_addr_len);
+    ssize_t bytes_sent = sendto(ctx->udp_sock->fd, payload, payload_len, 0, (struct sockaddr *)host_addr, ctx->host_addr_len);
     if (bytes_sent == -1) {
         fprintf(stderr, "error: failed to send probe: %s\n", strerror(errno));
         return -1;
     }
 
+    free(payload);
     ctx->active_probes[active_probes_idx] = probe;
     t_hop *hop = &ctx->hops[ctx->current_ttl];
     hop->queries[ctx->current_port - ctx->port].req = &probe;

@@ -14,22 +14,6 @@ t_socket *init_udp_socket() {
         return NULL;
     }
 
-    udp_sock->addr_len = sizeof(struct sockaddr_storage);
-    udp_sock->addr = malloc(udp_sock->addr_len);
-    if (!udp_sock->addr) {
-        fprintf(stderr, "error: failed to allocate UDP socket addr: %s\n", strerror(errno));
-        free(udp_sock);
-        return NULL;
-    }
-
-    ft_memset(udp_sock->addr, 0, udp_sock->addr_len);
-    udp_sock->addr->ss_family = AF_INET;
-    if (bind(udp_sock->fd , (struct sockaddr *)udp_sock->addr, udp_sock->addr_len) == -1) {
-        fprintf(stderr, "error: failed to bind UDP socket: %s\n", strerror(errno));
-        free(udp_sock);
-        return NULL;
-    }
-
     if (setsockopt(udp_sock->fd , SOL_SOCKET, SO_REUSEADDR, &(int){1}, sizeof(int)) == -1) {
         fprintf(stderr, "error: failed to set UDP socket options: %s\n", strerror(errno));
         free(udp_sock);
