@@ -65,7 +65,7 @@ typedef struct s_probe {
 
 typedef struct s_query {
     bool timeout;
-    struct timeval rtt;
+    double rtt;
     
     t_probe *req;
     t_icmp *rep;

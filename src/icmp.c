@@ -30,14 +30,25 @@ static t_icmp *init_icmp(uint8_t *icmp_raw, size_t icmp_raw_size) {
     return icmp;
 }
 
+double get_rtt(struct timeval send_time, struct timeval recv_time) {
+    long seconds = recv_time.tv_sec - send_time.tv_sec;
+    long microseconds = recv_time.tv_usec - send_time.tv_usec;
+
+    return (seconds * 1000.0) + (microseconds / 1000.0);
+}
+
 void process_icmp_reply(t_context *ctx) {
     uint8_t icmp_raw[ICMP_REPLY_MAX_LEN];
+    
     ssize_t bytes_received = recvfrom(ctx->icmp_sock->fd , icmp_raw, sizeof(icmp_raw), 0, NULL, NULL);
+    struct timeval recv_time;
+    if (gettimeofday(&recv_time, NULL) == -1) {
+        return;
+    }
 
     if (bytes_received > 0) {
         t_icmp *icmp = init_icmp(icmp_raw, (size_t)bytes_received);
         if (!icmp) {
-            free(icmp);
             return;
         }
 
@@ -56,12 +67,13 @@ void process_icmp_reply(t_context *ctx) {
         size_t probe_id = probe_dst_port - ctx->port;
         size_t probe_ttl = (probe_id / ctx->queries) + 1;
         t_query *query = &ctx->hops[probe_ttl - 1].queries[probe_id % ctx->queries];
-        if (query->rep != NULL) {
+        if (!query->req || query->rep != NULL) {
             free(icmp);
             return;
         }
 
         query->rep = icmp;
-        printf("src=%d, dst=%d, ttl=%ld, idx=%ld\n", ntohs(icmp->data.udp_hdr.source), ntohs(icmp->data.udp_hdr.dest), probe_ttl, probe_id % 3);
+        query->rtt = get_rtt(query->req->send_time, recv_time);
+        printf("src=%d, dst=%d, ttl=%ld, idx=%ld, rtt=%.3f\n", ntohs(icmp->data.udp_hdr.source), ntohs(icmp->data.udp_hdr.dest), probe_ttl, probe_id % 3, query->rtt);
     }
 }
