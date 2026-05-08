@@ -37,28 +37,31 @@ void process_icmp_reply(t_context *ctx) {
     if (bytes_received > 0) {
         t_icmp *icmp = init_icmp(icmp_raw, (size_t)bytes_received);
         if (!icmp) {
+            free(icmp);
             return;
         }
 
-        struct in_addr router_addr = { icmp->ip_hdr.saddr };
-        printf("router: %s, bytes_received: %ld\n", inet_ntoa(router_addr), bytes_received);
-
-        size_t probe_id = ntohs(icmp->data.udp_hdr.dest) - ctx->port;
-        size_t probe_ttl = probe_id / ctx->queries + 1;
-        t_hop *hop = &ctx->hops[probe_ttl - 1];
-        if (!hop) {
+        struct sockaddr_in *udp_addr = (struct sockaddr_in *)ctx->udp_sock->addr;
+        if (udp_addr->sin_port != icmp->data.udp_hdr.source) {
+            free(icmp);
             return;
         }
-        
-        hop->ttl = probe_ttl;
-        t_query *query = &hop->queries[(probe_id - 1) % ctx->queries];
-        if (!query) {
+
+        size_t probe_dst_port = ntohs(icmp->data.udp_hdr.dest);
+        if (probe_dst_port < ctx->port || probe_dst_port >= ctx->port + (ctx->max_ttl * ctx->queries)) {
+            free(icmp);
+            return;
+        }
+
+        size_t probe_id = probe_dst_port - ctx->port;
+        size_t probe_ttl = (probe_id / ctx->queries) + 1;
+        t_query *query = &ctx->hops[probe_ttl - 1].queries[probe_id % ctx->queries];
+        if (query->rep != NULL) {
+            free(icmp);
             return;
         }
 
         query->rep = icmp;
-        // query->req->is_active = false;
-
-        printf("src=%d, dst=%d, ttl=%ld, idx=%ld\n", ntohs(icmp->data.udp_hdr.source), ntohs(icmp->data.udp_hdr.dest), hop->ttl, probe_id % 3);
+        printf("src=%d, dst=%d, ttl=%ld, idx=%ld\n", ntohs(icmp->data.udp_hdr.source), ntohs(icmp->data.udp_hdr.dest), probe_ttl, probe_id % 3);
     }
 }

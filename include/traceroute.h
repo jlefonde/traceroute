@@ -54,14 +54,10 @@ typedef struct s_icmp {
     struct {
         struct iphdr ip_hdr;
         struct udphdr udp_hdr;
-        uint8_t *probe_payload;
-        size_t probe_payload_len;
     } data;
 } t_icmp;
 
 typedef struct s_probe {
-    bool is_active;
-
     size_t ttl;
     uint16_t dst_port;
     struct timeval send_time;
@@ -76,8 +72,6 @@ typedef struct s_query {
 } t_query;
 
 typedef struct s_hop {
-    size_t ttl;
-
     t_query *queries;
 } t_hop;
 
@@ -97,7 +91,7 @@ typedef struct s_context {
     t_socket *udp_sock;
     t_socket *icmp_sock;
 
-    t_probe *active_probes;
+    t_probe **active_probes;
     t_hop *hops;
     size_t next_hop;
 } t_context;

@@ -59,7 +59,7 @@ t_context *init_ctx() {
         return NULL;
     }
 
-    ctx->active_probes = malloc(sizeof(t_probe) * ctx->sim_queries);
+    ctx->active_probes = malloc(sizeof(t_probe *) * ctx->sim_queries);
     if (!ctx->active_probes) {
         fprintf(stderr, "error: failed to allocate active probes: %s\n", strerror(errno));
         free_ctx(ctx);
@@ -74,7 +74,7 @@ t_context *init_ctx() {
     }
 
     for (size_t i = 0; i < ctx->max_ttl; i++) {
-        ctx->hops[i].queries = malloc(sizeof(t_query *) * ctx->queries);
+        ctx->hops[i].queries = malloc(sizeof(t_query) * ctx->queries);
         if (!ctx->hops[i].queries) {
             fprintf(stderr, "error: failed to allocate hops' queries: %s\n", strerror(errno));
             free_ctx(ctx);
@@ -86,33 +86,26 @@ t_context *init_ctx() {
 }
 
 
-
-int find_active_probes_free_slot(t_context *ctx) {
-    for (int i = 0; i < ctx->sim_queries; i++) {
-        if (!ctx->active_probes[i].is_active) {
-            return i;
-        }
+int send_probe(t_context *ctx) {
+    t_probe *probe = malloc(sizeof(t_probe));
+    if (!probe) {
+        fprintf(stderr, "error: failed to allocate probe: %s\n", strerror(errno));
+        return -1; 
     }
 
-    return -1;
-}
+    t_hop *hop = &ctx->hops[ctx->current_ttl - 1];
+    size_t hop_query_idx = (ctx->current_port - ctx->port) % ctx->queries;
+    t_query *query = &hop->queries[hop_query_idx];
 
-int send_probe(t_context *ctx) {
-    // int active_probes_idx = find_active_probes_free_slot(ctx);
-    // if (active_probes_idx == -1) {
-    //     return 2;
-    // }
+    probe->dst_port = ctx->current_port++;
+    probe->ttl = hop_query_idx != (ctx->queries - 1) ? ctx->current_ttl : ctx->current_ttl++;
 
-    t_probe probe = {
-        .is_active = true,
-        .ttl = ctx->current_ttl,
-        .dst_port = ctx->current_port,
-    };
+    query->req = probe;
 
     struct sockaddr_in *host_addr = (struct sockaddr_in *)ctx->host_addr;
-    host_addr->sin_port = htons(probe.dst_port);
+    host_addr->sin_port = htons(probe->dst_port);
 
-    if (setsockopt(ctx->udp_sock->fd , IPPROTO_IP, IP_TTL, &probe.ttl, sizeof(probe.ttl)) == -1) {
+    if (setsockopt(ctx->udp_sock->fd , IPPROTO_IP, IP_TTL, &probe->ttl, sizeof(probe->ttl)) == -1) {
         fprintf(stderr, "error: failed to set socket TTL: %s\n", strerror(errno));
         return -1;
     }
@@ -124,7 +117,7 @@ int send_probe(t_context *ctx) {
         return -1;
     }
 
-    if (gettimeofday(&probe.send_time, NULL) == -1) {
+    if (gettimeofday(&probe->send_time, NULL) == -1) {
         fprintf(stderr, "error: failed to retrieve timestamp: %s\n", strerror(errno));
         return -1;
     }
@@ -136,14 +129,6 @@ int send_probe(t_context *ctx) {
     }
 
     free(payload);
-    // ctx->active_probes[active_probes_idx] = probe;
-    t_hop *hop = &ctx->hops[ctx->current_ttl];
-    hop->queries[(ctx->current_port - ctx->port) % ctx->queries].req = &probe;
-    if ((ctx->current_port - ctx->port) % ctx->queries == ctx->queries - 1) {
-        ctx->current_ttl++;
-    }
-
-    ctx->current_port++;
 }
 
 const char *get_icmp_dest_unreach_annotation(uint8_t code) {
