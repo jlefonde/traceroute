@@ -4,13 +4,8 @@ void free_ctx(t_context *ctx) {
     free(ctx->host_addr);
     free(ctx->active_probes);
 
-    if (ctx->udp_sock) {
-        free(ctx->udp_sock->addr);
-    }
-
-    if (ctx->icmp_sock) {
-        free(ctx->icmp_sock->addr);
-    }
+    free_socket(ctx->udp_sock);
+    free_socket(ctx->icmp_sock);
 
     if (ctx->hops) {
         for (size_t i = 0; i < ctx->max_ttl; i++) {
@@ -20,8 +15,6 @@ void free_ctx(t_context *ctx) {
         free(ctx->hops);
     }
 
-    close(ctx->udp_sock->fd);
-    close(ctx->icmp_sock->fd);
     free(ctx);
 }
 
@@ -46,6 +39,7 @@ t_context *init_ctx() {
     }
 
     ctx->options = init_options();
+    ctx->host_addr = NULL;
     ctx->port = 33434;
     ctx->current_port = ctx->port;
     ctx->current_ttl = 1;
@@ -104,10 +98,10 @@ int find_active_probes_free_slot(t_context *ctx) {
 }
 
 int send_probe(t_context *ctx) {
-    int active_probes_idx = find_active_probes_free_slot(ctx);
-    if (active_probes_idx == -1) {
-        return 2;
-    }
+    // int active_probes_idx = find_active_probes_free_slot(ctx);
+    // if (active_probes_idx == -1) {
+    //     return 2;
+    // }
 
     t_probe probe = {
         .is_active = true,
@@ -130,10 +124,6 @@ int send_probe(t_context *ctx) {
         return -1;
     }
 
-    pid_t pid = getpid();
-    ft_memcpy(payload, &pid, sizeof(pid));
-    printf("pid=%d\n", pid);
-
     if (gettimeofday(&probe.send_time, NULL) == -1) {
         fprintf(stderr, "error: failed to retrieve timestamp: %s\n", strerror(errno));
         return -1;
@@ -146,9 +136,13 @@ int send_probe(t_context *ctx) {
     }
 
     free(payload);
-    ctx->active_probes[active_probes_idx] = probe;
+    // ctx->active_probes[active_probes_idx] = probe;
     t_hop *hop = &ctx->hops[ctx->current_ttl];
-    hop->queries[ctx->current_port - ctx->port].req = &probe;
+    hop->queries[(ctx->current_port - ctx->port) % ctx->queries].req = &probe;
+    if ((ctx->current_port - ctx->port) % ctx->queries == ctx->queries - 1) {
+        ctx->current_ttl++;
+    }
+
     ctx->current_port++;
 }
 

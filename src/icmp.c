@@ -27,16 +27,6 @@ static t_icmp *init_icmp(uint8_t *icmp_raw, size_t icmp_raw_size) {
     data_offset += inner_ip_len;
     ft_memcpy(&icmp->data.udp_hdr, icmp_raw + data_offset, sizeof(struct udphdr));
 
-    data_offset += sizeof(struct udphdr);
-    icmp->data.probe_payload_len = icmp_raw_size - data_offset;
-    icmp->data.probe_payload = malloc(icmp->data.probe_payload_len);
-    if (!icmp->data.probe_payload) {
-        free(icmp);
-        return NULL;
-    }
-
-    ft_memcpy(icmp->data.probe_payload, icmp_raw + data_offset, icmp->data.probe_payload_len);
-
     return icmp;
 }
 
@@ -51,11 +41,24 @@ void process_icmp_reply(t_context *ctx) {
         }
 
         struct in_addr router_addr = { icmp->ip_hdr.saddr };
-        printf("%s\n", inet_ntoa(router_addr));
+        printf("router: %s, bytes_received: %ld\n", inet_ntoa(router_addr), bytes_received);
 
-        pid_t pid;
-        ft_memcpy(&pid, icmp->data.probe_payload, sizeof(pid));
+        size_t probe_id = ntohs(icmp->data.udp_hdr.dest) - ctx->port;
+        size_t probe_ttl = probe_id / ctx->queries + 1;
+        t_hop *hop = &ctx->hops[probe_ttl - 1];
+        if (!hop) {
+            return;
+        }
+        
+        hop->ttl = probe_ttl;
+        t_query *query = &hop->queries[(probe_id - 1) % ctx->queries];
+        if (!query) {
+            return;
+        }
 
-        printf("pid=%d, src=%d, dst=%d\n", pid, ntohs(icmp->data.udp_hdr.source), ntohs(icmp->data.udp_hdr.dest));
+        query->rep = icmp;
+        // query->req->is_active = false;
+
+        printf("src=%d, dst=%d, ttl=%ld, idx=%ld\n", ntohs(icmp->data.udp_hdr.source), ntohs(icmp->data.udp_hdr.dest), hop->ttl, probe_id % 3);
     }
 }

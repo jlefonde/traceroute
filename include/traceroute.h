@@ -107,6 +107,7 @@ void print_helper(t_option *options);
 t_socket *init_udp_socket();
 t_socket *init_icmp_socket();
 void free_ctx(t_context *ctx);
+void free_socket(t_socket *sock);
 void process_icmp_reply(t_context *ctx);
 
 #endif
