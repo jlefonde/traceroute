@@ -9,7 +9,13 @@ void free_ctx(t_context *ctx) {
 
     if (ctx->hops) {
         for (size_t i = 0; i < ctx->max_ttl; i++) {
-            free(ctx->hops[i].queries);
+            if (ctx->hops[i].queries) {
+                for (size_t j = 0; j < ctx->queries; j++) {
+                    free(ctx->hops[i].queries[j].req);
+                    free(ctx->hops[i].queries[j].rep);
+                }
+                free(ctx->hops[i].queries);
+            }
         }
 
         free(ctx->hops);
@@ -32,22 +38,23 @@ static t_option *init_options() {
 }
 
 t_context *init_ctx() {
-    t_context *ctx = malloc(sizeof(t_context));
+    t_context *ctx = ft_calloc(1, sizeof(t_context));
     if (!ctx) {
         fprintf(stderr, "error: failed to init context: %s\n", strerror(errno));
         return NULL;
     }
 
     ctx->options = init_options();
-    ctx->host_addr = NULL;
     ctx->port = 33434;
     ctx->current_port = ctx->port;
     ctx->current_ttl = 1;
     ctx->max_ttl = 30;
     ctx->queries = 3;
     ctx->sim_queries = 16;
-    ctx->timeout = 3;
+    ctx->timeout = 5;
     ctx->packet_len = 60;
+    ctx->unreached_port_ttl = 0;
+    ctx->next_hop = 0;
 
     ctx->udp_sock = init_udp_socket();
     if (!ctx->udp_sock) {
@@ -61,14 +68,14 @@ t_context *init_ctx() {
         return NULL;
     }
 
-    ctx->active_queries = malloc(sizeof(t_query *) * ctx->sim_queries);
+    ctx->active_queries = ft_calloc(ctx->sim_queries, sizeof(t_query *));
     if (!ctx->active_queries) {
         fprintf(stderr, "error: failed to allocate active queries: %s\n", strerror(errno));
         free_ctx(ctx);
         return NULL;
     }
 
-    ctx->hops = malloc(sizeof(t_hop) * ctx->max_ttl);
+    ctx->hops = ft_calloc(ctx->max_ttl, sizeof(t_hop));
     if (!ctx->hops) {
         fprintf(stderr, "error: failed to allocate hops: %s\n", strerror(errno));
         free_ctx(ctx);
@@ -76,7 +83,7 @@ t_context *init_ctx() {
     }
 
     for (size_t i = 0; i < ctx->max_ttl; i++) {
-        ctx->hops[i].queries = malloc(sizeof(t_query) * ctx->queries);
+        ctx->hops[i].queries = ft_calloc(ctx->queries, sizeof(t_query));
         if (!ctx->hops[i].queries) {
             fprintf(stderr, "error: failed to allocate hops' queries: %s\n", strerror(errno));
             free_ctx(ctx);
@@ -92,7 +99,6 @@ int send_probe(t_context *ctx) {
         return 0;
     }
 
-    // TODO: make sure the rest of the probe queries are send not only one
     if (ctx->unreached_port_ttl > 0 && ctx->current_ttl > ctx->unreached_port_ttl) {
         return 0;
     }
@@ -133,8 +139,10 @@ int send_probe(t_context *ctx) {
     if (setsockopt(ctx->udp_sock->fd , IPPROTO_IP, IP_TTL, &probe->ttl, sizeof(probe->ttl)) == -1) {
         return -1;
     }
-    size_t payload_len = (ctx->packet_len > sizeof(struct iphdr) - sizeof(struct udphdr)) ? ctx->packet_len - sizeof(struct iphdr) - sizeof(struct udphdr) : 0;
-    uint8_t *payload = malloc(sizeof(uint8_t) * payload_len);
+
+    size_t hdr_len = sizeof(struct iphdr) + sizeof(struct udphdr);
+    size_t payload_len = (ctx->packet_len > hdr_len) ? ctx->packet_len - hdr_len : 0;
+    uint8_t *payload = ft_calloc(payload_len, sizeof(uint8_t));
     if (!payload) {
         return -1;
     }
@@ -255,6 +263,7 @@ int main(int argc, char **argv) {
 
     int err = parse_args(ctx, argc, argv);
     if (err != 0) {
+        free_ctx(ctx);
         return 1;
     }
     
