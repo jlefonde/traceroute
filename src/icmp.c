@@ -2,7 +2,9 @@
 
 static t_icmp *init_icmp(uint8_t *icmp_raw, size_t icmp_raw_size) {
     t_icmp *icmp = malloc(sizeof(t_icmp));
-    if (!icmp) return NULL;
+    if (!icmp) {
+        return NULL;
+    }
 
     if (icmp_raw_size < (sizeof(struct iphdr) + sizeof(struct icmphdr))) {
         free(icmp);
@@ -39,7 +41,7 @@ double get_elapsed_ms(struct timeval start, struct timeval end) {
 
 void process_icmp_reply(t_context *ctx) {
     uint8_t icmp_raw[ICMP_REPLY_MAX_LEN];
-    
+
     ssize_t bytes_received = recvfrom(ctx->icmp_sock->fd , icmp_raw, sizeof(icmp_raw), 0, NULL, NULL);
     struct timeval recv_time;
     if (gettimeofday(&recv_time, NULL) == -1) {

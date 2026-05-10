@@ -21,7 +21,6 @@
 # include <netinet/ip_icmp.h>
 # include <sys/time.h>
 
-# define PROBE_TIMEOUT_SEC 2
 # define ICMP_FILTER 1
 
 typedef struct s_option {
@@ -103,8 +102,13 @@ int parse_args(t_context *ctx, int argc, char **argv);
 void print_helper(t_option *options);
 t_socket *init_udp_socket();
 t_socket *init_icmp_socket();
+t_context *init_ctx();
 void free_ctx(t_context *ctx);
 void free_socket(t_socket *sock);
+int send_probe(t_context *ctx);
+void set_timeout(t_context *ctx, struct timeval *timeout);
+void update_active_queries(t_context *ctx);
+void print_available_hops(t_context *ctx);
 void process_icmp_reply(t_context *ctx);
 double get_elapsed_ms(struct timeval start, struct timeval end);
 

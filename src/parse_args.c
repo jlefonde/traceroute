@@ -52,7 +52,7 @@ static int parse_short_option(t_context *ctx, char ***argv) {
         if (!option->has_argument) {
             option->data.flag.is_set = true;
             continue;
-        } 
+        }
 
         if (i == len - 1 && (*argv)[1]) {
             (*argv)++;
@@ -130,7 +130,7 @@ void print_helper(t_option *options) {
 
     for (size_t i = 0; options[i].short_opt || (options[i].long_opt && options[i].long_opt[0]); i++) {
         int len = 0;
-        
+
         if (options[i].short_opt && options[i].long_opt && options[i].long_opt[0]) {
             len = printf("  -%c, --%s", options[i].short_opt, options[i].long_opt);
         } else if (options[i].short_opt) {
@@ -185,7 +185,7 @@ int parse_args(t_context *ctx, int argc, char **argv) {
             return -1;
         }
     }
-    
+
     if (set_host_address(ctx, ctx->host_str) != 0) {
         return -1;
     }

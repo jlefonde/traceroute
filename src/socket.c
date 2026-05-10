@@ -19,7 +19,7 @@ t_socket *init_udp_socket() {
         fprintf(stderr, "error: failed to allocate UDP socket: %s\n", strerror(errno));
         return NULL;
     }
-    
+
     udp_sock->addr = NULL;
     udp_sock->fd = socket(AF_INET, SOCK_DGRAM, 0);
     if (udp_sock->fd  == -1) {
