@@ -211,6 +211,7 @@ static void print_hop(t_context *ctx, t_hop *hop) {
                 case ICMP_PKT_FILTERED: printf(" !X"); break;
                 case ICMP_PREC_VIOLATION: printf(" !V"); break;
                 case ICMP_PREC_CUTOFF: printf(" !C"); break;
+                case ICMP_PORT_UNREACH: break;
                 default: printf(" !%d", query->rep->hdr.code);
             }
         }
@@ -259,6 +260,46 @@ static void print_available_hops(t_context *ctx) {
     }
 }
 
+void set_timeout(t_context *ctx, struct timeval *timeout) {
+    struct timeval *oldest = NULL;
+    for (size_t i = 0; i < ctx->sim_queries; i++) {
+        if (!ctx->active_queries[i]) {
+            continue;
+        }
+
+        struct timeval *curr = &ctx->active_queries[i]->req->send_time;
+        if (!oldest || curr->tv_sec < oldest->tv_sec ||
+                (curr->tv_sec == oldest->tv_sec && curr->tv_usec < oldest->tv_usec)) {
+            oldest = curr;
+        }
+    }
+
+    if (!oldest) {
+        timeout->tv_sec = 0;
+        timeout->tv_usec = 10000;
+        return;
+    }
+
+    struct timeval now;
+    long sec, usec;
+    gettimeofday(&now, NULL);
+    sec = oldest->tv_sec + (long)ctx->timeout - now.tv_sec;
+    usec = oldest->tv_usec - now.tv_usec;
+
+    if (usec < 0) {
+        sec--;
+        usec += 1000000;
+    }
+
+    if (sec < 0) {
+        timeout->tv_sec = 0;
+        timeout->tv_usec = 0;
+    } else {
+        timeout->tv_sec = sec;
+        timeout->tv_usec = usec;
+    }
+}
+
 int main(int argc, char **argv) {
     if (getuid() != ROOT_UID) {
         fprintf(stderr, "error: root privileges are required\n");
@@ -287,9 +328,8 @@ int main(int argc, char **argv) {
 
         FD_ZERO(&read_fds);
         FD_SET(ctx->icmp_sock->fd, &read_fds);
-        timeout.tv_sec = 0;
-        // TODO: use oldest probe expected timeout
-        timeout.tv_usec = 10000;
+        
+        set_timeout(ctx, &timeout);
 
         if (select(ctx->icmp_sock->fd + 1, &read_fds, NULL, NULL, &timeout) > 0) {
             process_icmp_reply(ctx);
