@@ -96,6 +96,7 @@ typedef struct s_context {
     t_hop *hops;
     size_t next_hop;
     size_t unreached_port_ttl;
+    bool unreachable_hop;
 } t_context;
 
 int parse_args(t_context *ctx, int argc, char **argv);

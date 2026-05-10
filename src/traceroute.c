@@ -211,8 +211,7 @@ static void print_hop(t_context *ctx, t_hop *hop) {
                 case ICMP_PKT_FILTERED: printf(" !X"); break;
                 case ICMP_PREC_VIOLATION: printf(" !V"); break;
                 case ICMP_PREC_CUTOFF: printf(" !C"); break;
-                case ICMP_PORT_UNREACH: printf(""); break;
-                default: printf("  !%d", query->rep->hdr.code);
+                default: printf(" !%d", query->rep->hdr.code);
             }
         }
     }
@@ -221,19 +220,31 @@ static void print_hop(t_context *ctx, t_hop *hop) {
 }
 
 static void print_available_hops(t_context *ctx) {
-    while (ctx->next_hop < ctx->max_ttl) {
+    while (ctx->next_hop < ctx->max_ttl && 
+            (ctx->unreached_port_ttl == 0 || ctx->next_hop < ctx->unreached_port_ttl) &&
+            !ctx->unreachable_hop) 
+    {
         t_hop *hop = &ctx->hops[ctx->next_hop];
         bool hop_ready = true;
+        size_t unreachable_count = 0;
+        size_t timeout_count = 0;
 
         for (size_t i = 0; i < ctx->queries; i++) {
-            if (!hop->queries[i].req) {
+            t_query *query = &hop->queries[i];
+            if (!query->req) {
                 hop_ready = false;
                 break;
             }
             
-            if (!hop->queries[i].rep && hop->queries[i].rtt == 0) {
+            if (!query->rep && query->rtt == 0) {
                 hop_ready = false;
                 break;
+            }
+
+            if (query->rep && query->rep->hdr.type == ICMP_DEST_UNREACH && query->rep->hdr.code != ICMP_PORT_UNREACH) {
+                unreachable_count++;
+            } else if (query->rtt == -1) {
+                timeout_count++;
             }
         }
 
@@ -241,12 +252,10 @@ static void print_available_hops(t_context *ctx) {
             break;
         }
 
+        ctx->unreachable_hop = unreachable_count > 0 && (unreachable_count + timeout_count == ctx->queries);
+
         print_hop(ctx, hop);
         ctx->next_hop++;
-
-        if (ctx->unreached_port_ttl > 0 && ctx->next_hop >= ctx->unreached_port_ttl) {
-            break;
-        }
     }
 }
 
@@ -289,12 +298,10 @@ int main(int argc, char **argv) {
         update_active_queries(ctx);
         print_available_hops(ctx);
 
-        if (ctx->unreached_port_ttl > 0 && ctx->next_hop >= ctx->unreached_port_ttl) {
+        if ((ctx->unreached_port_ttl > 0 && ctx->next_hop >= ctx->unreached_port_ttl) || 
+                ctx->unreachable_hop ||
+                ctx->next_hop >= ctx->max_ttl) {
             break;
-        }
-
-        if (ctx->next_hop >= ctx->max_ttl) {
-            break;   
         }
     }
 
