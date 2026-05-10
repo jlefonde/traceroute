@@ -2,7 +2,7 @@
 
 void free_ctx(t_context *ctx) {
     free(ctx->host_addr);
-    free(ctx->active_probes);
+    free(ctx->active_queries);
 
     free_socket(ctx->udp_sock);
     free_socket(ctx->icmp_sock);
@@ -46,6 +46,8 @@ t_context *init_ctx() {
     ctx->max_ttl = 30;
     ctx->queries = 3;
     ctx->sim_queries = 16;
+    ctx->timeout = 3;
+    ctx->packet_len = 60;
 
     ctx->udp_sock = init_udp_socket();
     if (!ctx->udp_sock) {
@@ -59,9 +61,9 @@ t_context *init_ctx() {
         return NULL;
     }
 
-    ctx->active_probes = malloc(sizeof(t_probe *) * ctx->sim_queries);
-    if (!ctx->active_probes) {
-        fprintf(stderr, "error: failed to allocate active probes: %s\n", strerror(errno));
+    ctx->active_queries = malloc(sizeof(t_query *) * ctx->sim_queries);
+    if (!ctx->active_queries) {
+        fprintf(stderr, "error: failed to allocate active queries: %s\n", strerror(errno));
         free_ctx(ctx);
         return NULL;
     }
@@ -85,50 +87,72 @@ t_context *init_ctx() {
     return ctx;
 }
 
-
 int send_probe(t_context *ctx) {
+    if (ctx->current_ttl > ctx->max_ttl) {
+        return 0;
+    }
+
+    // TODO: make sure the rest of the probe queries are send not only one
+    if (ctx->unreached_port_ttl > 0 && ctx->current_ttl > ctx->unreached_port_ttl) {
+        return 0;
+    }
+
+    int active_query_idx = -1;
+    for (size_t i = 0; i < ctx->sim_queries; i++) {
+        if (ctx->active_queries[i] == NULL) {
+            active_query_idx = i;
+            break;
+        }
+    }
+
+    if (active_query_idx == -1) {
+        return 0;
+    }
+
     t_probe *probe = malloc(sizeof(t_probe));
     if (!probe) {
-        fprintf(stderr, "error: failed to allocate probe: %s\n", strerror(errno));
         return -1; 
     }
 
-    t_hop *hop = &ctx->hops[ctx->current_ttl - 1];
     size_t hop_query_idx = (ctx->current_port - ctx->port) % ctx->queries;
-    t_query *query = &hop->queries[hop_query_idx];
-
-    probe->dst_port = ctx->current_port++;
-    probe->ttl = hop_query_idx != (ctx->queries - 1) ? ctx->current_ttl : ctx->current_ttl++;
-
+    t_query *query = &ctx->hops[ctx->current_ttl - 1].queries[hop_query_idx];
+    
+    probe->dst_port = ctx->current_port;
+    probe->ttl = ctx->current_ttl;
     query->req = probe;
+    ctx->active_queries[active_query_idx] = query;
 
     struct sockaddr_in *host_addr = (struct sockaddr_in *)ctx->host_addr;
     host_addr->sin_port = htons(probe->dst_port);
 
     if (setsockopt(ctx->udp_sock->fd , IPPROTO_IP, IP_TTL, &probe->ttl, sizeof(probe->ttl)) == -1) {
-        fprintf(stderr, "error: failed to set socket TTL: %s\n", strerror(errno));
         return -1;
     }
 
-    size_t payload_len = ctx->packet_len - sizeof(struct iphdr) - sizeof(struct udphdr);
+    size_t payload_len = (ctx->packet_len > sizeof(struct iphdr) - sizeof(struct udphdr)) ? ctx->packet_len - sizeof(struct iphdr) - sizeof(struct udphdr) : 0;
     uint8_t *payload = malloc(sizeof(uint8_t) * payload_len);
     if (!payload) {
-        fprintf(stderr, "error: failed to allocate payload: %s\n", strerror(errno));
         return -1;
     }
 
-    if (gettimeofday(&probe->send_time, NULL) == -1) {
-        fprintf(stderr, "error: failed to retrieve timestamp: %s\n", strerror(errno));
+    if (gettimeofday(&probe->send_time, NULL) == -1) { 
+        free(payload);
         return -1;
     }
 
     ssize_t bytes_sent = sendto(ctx->udp_sock->fd, payload, payload_len, 0, (struct sockaddr *)host_addr, ctx->host_addr_len);
     if (bytes_sent == -1) {
-        fprintf(stderr, "error: failed to send probe: %s\n", strerror(errno));
+        free(payload);
         return -1;
     }
 
+    ctx->current_port++;
+    if (hop_query_idx == ctx->queries - 1) {
+        ctx->current_ttl++;
+    }
+
     free(payload);
+    return 1;
 }
 
 const char *get_icmp_dest_unreach_annotation(uint8_t code) {
@@ -143,6 +167,25 @@ const char *get_icmp_dest_unreach_annotation(uint8_t code) {
         case ICMP_PREC_CUTOFF: return "!C";
         case ICMP_PORT_UNREACH: return "";
         default: return NULL;
+    }
+}
+
+static void update_active_queries(t_context *ctx) {
+    struct timeval now;
+    gettimeofday(&now, NULL);
+
+    for (size_t i = 0; i < ctx->sim_queries; i++) {
+        t_query *query = ctx->active_queries[i];
+        if (!query) {
+            continue;
+        }
+
+        if (query->rep) {
+            ctx->active_queries[i] = NULL;
+        } else if (get_elapsed_ms(query->req->send_time, now) >= (double)ctx->timeout * 1000.0) {
+            query->rtt = -1.0;
+            ctx->active_queries[i] = NULL;
+        }
     }
 }
 
@@ -161,25 +204,33 @@ int main(int argc, char **argv) {
     if (err != 0) {
         return 1;
     }
-
-    fd_set read_fds;
-    FD_ZERO(&read_fds);
-    FD_SET(ctx->icmp_sock->fd , &read_fds);
     
+    char *host_ip = inet_ntoa(((struct sockaddr_in *)ctx->host_addr)->sin_addr);
+    printf("traceroute to %s (%s), %ld hops max, %ld bytes packets\n", ctx->host_str, host_ip, ctx->max_ttl, ctx->packet_len);
+
+    fd_set read_fds; 
     struct timeval timeout;
-    timeout.tv_sec = 0;
-    timeout.tv_usec = 50000;
     
-    char *host_sock_addr = inet_ntoa(((struct sockaddr_in *)ctx->host_addr)->sin_addr);
-    printf("traceroute to %s (%s), %ld hops max, %ld bytes packets\n", host_sock_addr, host_sock_addr, ctx->max_ttl, ctx->packet_len);
-    send_probe(ctx);
-
     while (1) {
-        int nfds = select(ctx->icmp_sock->fd  + 1, &read_fds, NULL, NULL, &timeout);
-        if (nfds == -1) {
-            fprintf(stderr, "error: select failed: %s\n", strerror(errno));
-        } else if (nfds > 0 && FD_ISSET(ctx->icmp_sock->fd , &read_fds)) {
+        while (send_probe(ctx) > 0);
+
+        FD_ZERO(&read_fds);
+        FD_SET(ctx->icmp_sock->fd, &read_fds);
+        timeout.tv_sec = 0;
+        timeout.tv_usec = 10000;
+
+        if (select(ctx->icmp_sock->fd + 1, &read_fds, NULL, NULL, &timeout) > 0) {
             process_icmp_reply(ctx);
+        }
+        
+        update_active_queries(ctx);
+
+        if (ctx->unreached_port_ttl > 0 && ctx->next_hop >= ctx->unreached_port_ttl) {
+            break;
+        }
+
+        if (ctx->next_hop >= ctx->max_ttl) {
+            break;   
         }
     }
 

@@ -118,15 +118,8 @@ static int set_host_address(t_context *ctx, char *host_str) {
         return -1;
     }
 
-    if (res->ai_family == AF_INET) {
-        ctx->packet_len = 60;
-    } else if (res->ai_family == AF_INET6) {
-        ctx->packet_len = 80;
-    }
-
     ft_memcpy(ctx->host_addr, res->ai_addr, ctx->host_addr_len);
 
-    
     freeaddrinfo(res);
     return 0;
 }
@@ -172,7 +165,6 @@ int parse_args(t_context *ctx, int argc, char **argv) {
         exit(EXIT_SUCCESS);
     }
 
-    char *host_str = NULL;
     for (char **arg = argv + 1; *arg; arg++) {
         int err = 0;
 
@@ -182,8 +174,8 @@ int parse_args(t_context *ctx, int argc, char **argv) {
         else if ((*arg)[0] == '-' && (*arg)[1] == '-' && (*arg)[2] && (*arg)[2] != '-') {
             err = parse_long_option(ctx, &arg);
         }
-        else if (!host_str) {
-            host_str = *arg;
+        else if (!ctx->host_str) {
+            ctx->host_str = *arg;
         } else {
             fprintf(stderr, "error: extra argument '%s'\n", *arg);
             return -1;
@@ -194,7 +186,7 @@ int parse_args(t_context *ctx, int argc, char **argv) {
         }
     }
     
-    if (set_host_address(ctx, host_str) != 0) {
+    if (set_host_address(ctx, ctx->host_str) != 0) {
         return -1;
     }
 

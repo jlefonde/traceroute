@@ -30,9 +30,9 @@ static t_icmp *init_icmp(uint8_t *icmp_raw, size_t icmp_raw_size) {
     return icmp;
 }
 
-double get_rtt(struct timeval send_time, struct timeval recv_time) {
-    long seconds = recv_time.tv_sec - send_time.tv_sec;
-    long microseconds = recv_time.tv_usec - send_time.tv_usec;
+double get_elapsed_ms(struct timeval start, struct timeval end) {
+    long seconds = end.tv_sec - start.tv_sec;
+    long microseconds = end.tv_usec - start.tv_usec;
 
     return (seconds * 1000.0) + (microseconds / 1000.0);
 }
@@ -67,13 +67,19 @@ void process_icmp_reply(t_context *ctx) {
         size_t probe_id = probe_dst_port - ctx->port;
         size_t probe_ttl = (probe_id / ctx->queries) + 1;
         t_query *query = &ctx->hops[probe_ttl - 1].queries[probe_id % ctx->queries];
-        if (!query->req || query->rep != NULL) {
+        if (!query->req || query->rep) {
             free(icmp);
             return;
         }
 
         query->rep = icmp;
-        query->rtt = get_rtt(query->req->send_time, recv_time);
-        printf("src=%d, dst=%d, ttl=%ld, idx=%ld, rtt=%.3f\n", ntohs(icmp->data.udp_hdr.source), ntohs(icmp->data.udp_hdr.dest), probe_ttl, probe_id % 3, query->rtt);
+        query->rtt = get_elapsed_ms(query->req->send_time, recv_time);
+
+        if (query->rep->hdr.type == ICMP_DEST_UNREACH && query->rep->hdr.code == ICMP_PORT_UNREACH) {
+            ctx->unreached_port_ttl = probe_ttl;
+        }
+
+        struct in_addr router_addr = {query->rep->ip_hdr.saddr};
+        printf("src=%d, dst=%d, ttl=%ld, idx=%ld, addr=%s, rtt=%.3f, type=%d, code=%d\n", ntohs(icmp->data.udp_hdr.source), ntohs(icmp->data.udp_hdr.dest), probe_ttl, probe_id % 3, inet_ntoa(router_addr), query->rtt, query->rep->hdr.type, query->rep->hdr.code);
     }
 }
