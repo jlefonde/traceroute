@@ -122,13 +122,17 @@ int send_probe(t_context *ctx) {
     query->req = probe;
     ctx->active_queries[active_query_idx] = query;
 
+    ctx->current_port++;
+    if (hop_query_idx == ctx->queries - 1) {
+        ctx->current_ttl++;
+    }
+
     struct sockaddr_in *host_addr = (struct sockaddr_in *)ctx->host_addr;
     host_addr->sin_port = htons(probe->dst_port);
 
     if (setsockopt(ctx->udp_sock->fd , IPPROTO_IP, IP_TTL, &probe->ttl, sizeof(probe->ttl)) == -1) {
         return -1;
     }
-
     size_t payload_len = (ctx->packet_len > sizeof(struct iphdr) - sizeof(struct udphdr)) ? ctx->packet_len - sizeof(struct iphdr) - sizeof(struct udphdr) : 0;
     uint8_t *payload = malloc(sizeof(uint8_t) * payload_len);
     if (!payload) {
@@ -146,28 +150,8 @@ int send_probe(t_context *ctx) {
         return -1;
     }
 
-    ctx->current_port++;
-    if (hop_query_idx == ctx->queries - 1) {
-        ctx->current_ttl++;
-    }
-
     free(payload);
     return 1;
-}
-
-const char *get_icmp_dest_unreach_annotation(uint8_t code) {
-    switch (code) {
-        case ICMP_NET_UNREACH: return "!N";
-        case ICMP_HOST_UNREACH: return "!H";
-        case ICMP_PROT_UNREACH: return "!P";
-        case ICMP_FRAG_NEEDED: return "!F";
-        case ICMP_SR_FAILED: return "!S";
-        case ICMP_PKT_FILTERED: return "!X";
-        case ICMP_PREC_VIOLATION: return "!V";
-        case ICMP_PREC_CUTOFF: return "!C";
-        case ICMP_PORT_UNREACH: return "";
-        default: return NULL;
-    }
 }
 
 static void update_active_queries(t_context *ctx) {
@@ -185,6 +169,75 @@ static void update_active_queries(t_context *ctx) {
         } else if (get_elapsed_ms(query->req->send_time, now) >= (double)ctx->timeout * 1000.0) {
             query->rtt = -1.0;
             ctx->active_queries[i] = NULL;
+        }
+    }
+}
+
+static void print_hop(t_context *ctx, t_hop *hop) {
+    printf("%2zu", ctx->next_hop + 1);
+
+    uint32_t last_addr = 0;
+    for (size_t i = 0; i < ctx->queries; i++) {
+        t_query *query = &hop->queries[i];
+
+        if (query->rtt == -1) {
+            printf("  *");
+            continue;
+        }
+
+        uint32_t curr_addr = query->rep->ip_hdr.saddr;
+        if (curr_addr != last_addr) {
+            struct in_addr addr = { curr_addr };
+            printf("  %s", inet_ntoa(addr));
+            last_addr = curr_addr;
+        }
+
+        printf("  %.3f ms", query->rtt);
+        if (query->rep->hdr.type == ICMP_DEST_UNREACH) {
+            switch (query->rep->hdr.code) {
+                case ICMP_NET_UNREACH: printf(" !N"); break;
+                case ICMP_HOST_UNREACH: printf(" !H"); break;
+                case ICMP_PROT_UNREACH: printf(" !P"); break;
+                case ICMP_FRAG_NEEDED: printf(" !F"); break;
+                case ICMP_SR_FAILED: printf(" !S"); break;
+                case ICMP_PKT_FILTERED: printf(" !X"); break;
+                case ICMP_PREC_VIOLATION: printf(" !V"); break;
+                case ICMP_PREC_CUTOFF: printf(" !C"); break;
+                case ICMP_PORT_UNREACH: printf(""); break;
+                default: printf("  !%d", query->rep->hdr.code);
+            }
+        }
+    }
+
+    printf("\n");
+}
+
+static void print_available_hops(t_context *ctx) {
+    while (ctx->next_hop < ctx->max_ttl) {
+        t_hop *hop = &ctx->hops[ctx->next_hop];
+        bool hop_ready = true;
+
+        for (size_t i = 0; i < ctx->queries; i++) {
+            if (!hop->queries[i].req) {
+                hop_ready = false;
+                break;
+            }
+            
+            if (!hop->queries[i].rep && hop->queries[i].rtt == 0) {
+                hop_ready = false;
+                break;
+            }
+        }
+
+        if (!hop_ready) {
+            break;
+        }
+
+        print_hop(ctx, hop);
+        ctx->next_hop++;
+
+        if (ctx->unreached_port_ttl > 0 && ctx->next_hop >= ctx->unreached_port_ttl) {
+            break;
         }
     }
 }
@@ -217,6 +270,7 @@ int main(int argc, char **argv) {
         FD_ZERO(&read_fds);
         FD_SET(ctx->icmp_sock->fd, &read_fds);
         timeout.tv_sec = 0;
+        // TODO: use oldest probe expected timeout
         timeout.tv_usec = 10000;
 
         if (select(ctx->icmp_sock->fd + 1, &read_fds, NULL, NULL, &timeout) > 0) {
@@ -224,6 +278,7 @@ int main(int argc, char **argv) {
         }
         
         update_active_queries(ctx);
+        print_available_hops(ctx);
 
         if (ctx->unreached_port_ttl > 0 && ctx->next_hop >= ctx->unreached_port_ttl) {
             break;

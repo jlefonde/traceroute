@@ -75,11 +75,11 @@ void process_icmp_reply(t_context *ctx) {
         query->rep = icmp;
         query->rtt = get_elapsed_ms(query->req->send_time, recv_time);
 
-        if (query->rep->hdr.type == ICMP_DEST_UNREACH && query->rep->hdr.code == ICMP_PORT_UNREACH) {
+        if (!ctx->unreached_port_ttl && query->rep->hdr.type == ICMP_DEST_UNREACH && query->rep->hdr.code == ICMP_PORT_UNREACH) {
             ctx->unreached_port_ttl = probe_ttl;
         }
 
-        struct in_addr router_addr = {query->rep->ip_hdr.saddr};
-        printf("src=%d, dst=%d, ttl=%ld, idx=%ld, addr=%s, rtt=%.3f, type=%d, code=%d\n", ntohs(icmp->data.udp_hdr.source), ntohs(icmp->data.udp_hdr.dest), probe_ttl, probe_id % 3, inet_ntoa(router_addr), query->rtt, query->rep->hdr.type, query->rep->hdr.code);
+        // struct in_addr router_addr = {query->rep->ip_hdr.saddr};
+        // printf("src=%d, dst=%d, ttl=%ld, idx=%ld, addr=%s, rtt=%.3f, type=%d, code=%d\n", ntohs(icmp->data.udp_hdr.source), ntohs(icmp->data.udp_hdr.dest), probe_ttl, probe_id % 3, inet_ntoa(router_addr), query->rtt, query->rep->hdr.type, query->rep->hdr.code);
     }
 }
