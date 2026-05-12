@@ -1,6 +1,32 @@
 #include "traceroute.h"
 
+#define MAX_TTL_VALUE 255
+#define MIN_TTL_VALUE 1
+
+static bool parse_max_ttl(const char *str, void *value)
+{
+    if (!str) {
+        return false;
+    }
+
+    int max_ttl = ft_atoi(str);
+    if (!max_ttl) {
+        printf("error: invalid max_ttl\n");
+        return false;
+    }
+
+    if (max_ttl < MIN_TTL_VALUE || max_ttl > MAX_TTL_VALUE) {
+        printf("error: max_ttl out of range [%d,%d]\n", MIN_TTL_VALUE, MAX_TTL_VALUE);
+        return false;
+    }
+
+    *((int *)value) = max_ttl;
+    return true;
+}
+
 t_option *init_options() {
+    static size_t max_ttl = 30;
+
     static t_option options[] = {
         [OPT_HELP] = {
             .short_opt = 'h',
@@ -14,9 +40,28 @@ t_option *init_options() {
             .description = "Do not perform reverse DNS lookup in hop display",
             .has_argument = false,
         },
+        [OPT_MAX_TTL] = {
+            .short_opt = 'm',
+            .long_opt = "max-ttl",
+            .description = "Specifies the maximum number of hops (time-to-live) to be performed: [1,255]",
+            .has_argument = true,
+            .data.arg.meta = "max_ttl",
+            .data.arg.value = &max_ttl,
+            .data.arg.parser = parse_max_ttl,
+        },
     };
 
     return options;
+}
+
+static bool set_option_value(t_option *option, char *argv) {
+    option->data.arg.raw = argv;
+    if (option->data.arg.parser) {
+        return option->data.arg.parser(option->data.arg.raw, option->data.arg.value);
+    }
+    
+    option->data.arg.value = option->data.arg.raw;
+    return true;
 }
 
 int parse_short_option(t_option *options, char ***argv) {
@@ -39,7 +84,9 @@ int parse_short_option(t_option *options, char ***argv) {
 
         if (i == len - 1 && (*argv)[1]) {
             (*argv)++;
-            option->data.arg.raw = **argv;
+            if (!set_option_value(option, **argv)) {
+                return -1;
+            }
         }
         else {
             fprintf(stderr, "error: option '-%c' requires an argument\n", short_opt);
@@ -64,7 +111,9 @@ int parse_long_option(t_option *options, char ***argv) {
     }
     else if ((*argv)[1]) {
         (*argv)++;
-        option->data.arg.raw = **argv;
+        if (!set_option_value(option, **argv)) {
+            return -1;
+        }
     }
     else {
         fprintf(stderr, "error: option '--%s' requires an argument\n", long_opt);
@@ -105,14 +154,6 @@ void *get_option_value(t_option *options, t_option_idx idx) {
     t_option *opt = get_option_by_index(options, idx);
     if (!opt || !opt->has_argument) {
         return NULL;
-    }
-
-    if (opt->data.arg.raw) {
-        if (opt->data.arg.parser)
-            opt->data.arg.value = opt->data.arg.parser(opt->data.arg.raw);
-        else
-            opt->data.arg.value = opt->data.arg.raw;
-        return opt->data.arg.value;
     }
 
     return opt->data.arg.value;

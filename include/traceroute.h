@@ -20,6 +20,7 @@
 # include <sys/time.h>
 
 # define ROOT_UID 0
+# define HELPER_SPACE_LEN 32
 # define ICMP_FILTER 1
 # define ICMP_REPLY_MAX_LEN 576
 # define HOST_MAX_LEN 256
@@ -27,10 +28,11 @@
 typedef enum e_option_idx {
     OPT_HELP,
     OPT_NO_REVERSE,
+    OPT_MAX_TTL,
     OPT_COUNT, // Keep at the end of the enum
 } t_option_idx;
 
-typedef void* (*parser_fn)(const char *str);
+typedef bool (*parser_fn)(const char *str, void *value);
 
 typedef struct s_option {
     const char short_opt;

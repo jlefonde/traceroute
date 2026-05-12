@@ -40,7 +40,8 @@ t_context *init_ctx(t_option *options, char *host) {
     ctx->port = 33434;
     ctx->current_port = ctx->port;
     ctx->current_ttl = 1;
-    ctx->max_ttl = 30;
+    size_t *max_ttl = get_option_value(options, OPT_MAX_TTL);
+    ctx->max_ttl = *max_ttl;
     ctx->queries = 3;
     ctx->sim_queries = 16;
     ctx->timeout = 5;

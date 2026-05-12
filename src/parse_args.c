@@ -19,8 +19,8 @@ void print_helper(t_option *options) {
             len += printf(" <%s>", options[i].data.arg.meta);
         }
 
-        if (len < 24) {
-            printf("%*s", 24 - len, "");
+        if (len < HELPER_SPACE_LEN) {
+            printf("%*s", HELPER_SPACE_LEN - len, "");
         } else {
             printf(" ");
         }
