@@ -2,8 +2,6 @@
 # define FT_TRACEROUTE_H
 
 # define _POSIX_C_SOURCE 200112L
-# define ROOT_UID 0
-# define ICMP_REPLY_MAX_LEN 576
 
 # include "../libft/include/libft.h"
 # include <stdio.h>
@@ -21,7 +19,10 @@
 # include <netinet/ip_icmp.h>
 # include <sys/time.h>
 
+# define ROOT_UID 0
 # define ICMP_FILTER 1
+# define ICMP_REPLY_MAX_LEN 576
+# define HOST_MAX_LEN 256
 
 typedef struct s_option {
     const char short_opt;
@@ -111,5 +112,7 @@ void update_active_queries(t_context *ctx);
 void print_available_hops(t_context *ctx);
 void process_icmp_reply(t_context *ctx);
 double get_elapsed_ms(struct timeval start, struct timeval end);
+t_option *get_option_short(t_option *options, char opt);
+t_option *get_option_long(t_option *options, char *opt);
 
 #endif

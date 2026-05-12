@@ -102,7 +102,24 @@ static void print_hop(t_context *ctx, t_hop *hop) {
         uint32_t curr_addr = query->rep->ip_hdr.saddr;
         if (curr_addr != last_addr) {
             struct in_addr addr = { curr_addr };
-            printf("  %s", inet_ntoa(addr));
+
+            t_option *n = get_option_short(ctx->options , 'n');
+            if (!n || !n->data.flag.is_set) {
+                printf("  %s", inet_ntoa(addr));
+            } else {
+                struct sockaddr_in sock_addr = { 
+                    .sin_addr = addr,
+                    .sin_family = AF_INET,
+                };
+
+                char host[HOST_MAX_LEN];
+                if (getnameinfo((struct sockaddr *)&sock_addr, sizeof(struct sockaddr_in), host, HOST_MAX_LEN, NULL, 0, NI_NAMEREQD) == 0) {
+                    printf("  %s", host);
+                } else {
+                    printf("  %s", inet_ntoa(addr));
+                }
+            }
+
             last_addr = curr_addr;
         }
 

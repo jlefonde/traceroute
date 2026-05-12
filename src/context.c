@@ -8,6 +8,12 @@ static t_option *init_options() {
             .description = "Print this help message and exit",
             .has_argument = false,
         },
+        {
+            .short_opt = 'n',
+            .long_opt = "",
+            .description = "Do not perform reverse DNS lookup in hop display",
+            .has_argument = false,
+        },
     };
 
     return options;

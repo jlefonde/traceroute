@@ -1,25 +1,5 @@
 #include "traceroute.h"
 
-static t_option *get_option_short(t_option *options, char opt) {
-    for (size_t i = 0; options[i].short_opt; i++) {
-        if (options[i].short_opt == opt) {
-            return &options[i];
-        }
-    }
-
-    return NULL;
-}
-
-static t_option *get_option_long(t_option *options, char *opt) {
-    for (size_t i = 0; options[i].long_opt; i++) {
-        if (options[i].long_opt[0] && ft_strcmp(options[i].long_opt, opt) == 0) {
-            return &options[i];
-        }
-    }
-
-    return NULL;
-}
-
 static bool check_helper(char **argv) {
     for (char **arg = argv + 1; *arg; arg++) {
         if ((*arg)[0] != '-') {
@@ -122,6 +102,26 @@ static int set_host_address(t_context *ctx, char *host_str) {
 
     freeaddrinfo(res);
     return 0;
+}
+
+t_option *get_option_short(t_option *options, char opt) {
+    for (size_t i = 0; options[i].short_opt; i++) {
+        if (options[i].short_opt == opt) {
+            return &options[i];
+        }
+    }
+
+    return NULL;
+}
+
+t_option *get_option_long(t_option *options, char *opt) {
+    for (size_t i = 0; options[i].long_opt; i++) {
+        if (options[i].long_opt[0] && ft_strcmp(options[i].long_opt, opt) == 0) {
+            return &options[i];
+        }
+    }
+
+    return NULL;
 }
 
 void print_helper(t_option *options) {
