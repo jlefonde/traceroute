@@ -32,26 +32,15 @@ typedef enum e_option_idx {
     OPT_COUNT, // Keep at the end of the enum
 } t_option_idx;
 
-typedef bool (*parser_fn)(const char *str, void *value);
-
 typedef struct s_option {
     const char short_opt;
     const char *long_opt;
     const char *description;
     const bool has_argument;
 
-    union {
-        struct {
-            const char *meta;
-            char *raw;
-            void *value;
-            parser_fn parser;
-        } arg;
-
-        struct {
-            bool is_set;
-        } flag;
-    } data;
+    const char *meta;
+    char *value;
+    bool is_set;
 } t_option;
 
 typedef struct s_socket {
@@ -87,15 +76,16 @@ typedef struct s_hop {
 } t_hop;
 
 typedef struct s_context {    
-    t_option *options;
     char *host_str;
     struct sockaddr_storage *host_addr;
     socklen_t host_addr_len;
 
+    uint8_t max_ttl;
+    bool no_reverse;
+
     uint16_t port;
     uint16_t current_port;
     size_t current_ttl;
-    size_t max_ttl;
     size_t queries;
     size_t sim_queries;
     size_t packet_len;
@@ -117,7 +107,7 @@ int parse_long_option(t_option *options, char ***argv);
 int parse_args(int argc, char **argv, t_option *options, char **host);
 void print_helper(t_option *options);
 t_option *get_option_by_index(t_option *options, t_option_idx idx);
-void *get_option_value(t_option *options, t_option_idx idx);
+char *get_option_value(t_option *options, t_option_idx idx);
 t_socket *init_udp_socket();
 t_socket *init_icmp_socket();
 t_context *init_ctx(t_option *options, char *host);

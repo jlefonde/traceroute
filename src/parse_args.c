@@ -15,8 +15,8 @@ void print_helper(t_option *options) {
             len = printf("      --%s", options[i].long_opt);
         }
 
-        if (options[i].has_argument && options[i].data.arg.meta) {
-            len += printf(" <%s>", options[i].data.arg.meta);
+        if (options[i].has_argument && options[i].meta) {
+            len += printf(" <%s>", options[i].meta);
         }
 
         if (len < HELPER_SPACE_LEN) {
@@ -62,7 +62,7 @@ int parse_args(int argc, char **argv, t_option *options, char **host) {
     }
 
     t_option *help = get_option_by_index(options, OPT_HELP);
-    if (help && help->data.flag.is_set) {
+    if (help && help->is_set) {
         print_helper(options);
         exit(EXIT_SUCCESS);
     }

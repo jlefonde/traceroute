@@ -103,8 +103,7 @@ static void print_hop(t_context *ctx, t_hop *hop) {
         if (curr_addr != last_addr) {
             struct in_addr addr = { curr_addr };
 
-            t_option *n = get_option_by_index(ctx->options, OPT_NO_REVERSE);
-            if (!n || !n->data.flag.is_set) {
+            if (ctx->no_reverse) {
                 printf("  %s", inet_ntoa(addr));
             } else {
                 struct sockaddr_in sock_addr = { 

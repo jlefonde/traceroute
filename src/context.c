@@ -1,6 +1,24 @@
 #include "traceroute.h"
 
-static int set_host_addr(t_context *ctx) {
+#define MIN_TTL_VALUE 1
+#define MAX_TTL_VALUE 255
+
+static bool set_max_ttl(t_context *ctx, char *max_ttl_str) {
+    if (!max_ttl_str) {
+        return true;
+    }
+
+    int max_ttl = ft_atoi(max_ttl_str);
+    if (max_ttl < MIN_TTL_VALUE || max_ttl > MAX_TTL_VALUE) {
+        fprintf(stderr, "error: max_ttl out of range [%d,%d]\n", MIN_TTL_VALUE, MAX_TTL_VALUE);
+        return false;
+    }
+
+    ctx->max_ttl = max_ttl;
+    return true;
+}
+
+static bool set_host_addr(t_context *ctx) {
     struct addrinfo *res;
     struct addrinfo hints = {
         .ai_family = AF_INET,
@@ -11,7 +29,7 @@ static int set_host_addr(t_context *ctx) {
     int err_code = getaddrinfo(ctx->host_str, NULL, &hints, &res);
     if (err_code != 0) {
         fprintf(stderr, "error: '%s': %s\n", ctx->host_str, gai_strerror(err_code));
-        return -1;
+        return false;
     }
 
     ctx->host_addr_len = res->ai_addrlen;
@@ -19,13 +37,13 @@ static int set_host_addr(t_context *ctx) {
     if (!ctx->host_addr) {
         fprintf(stderr, "error: failed to allocate host address: %s\n", strerror(errno));
         freeaddrinfo(res);
-        return -1;
+        return false;
     }
 
     ft_memcpy(ctx->host_addr, res->ai_addr, ctx->host_addr_len);
 
     freeaddrinfo(res);
-    return 0;
+    return true;
 }
 
 t_context *init_ctx(t_option *options, char *host) {
@@ -35,13 +53,13 @@ t_context *init_ctx(t_option *options, char *host) {
         return NULL;
     }
 
-    ctx->options = options;
-    ctx->host_str = host;
+    ctx->max_ttl = 30;
+    ctx->no_reverse = false;
+
     ctx->port = 33434;
+    ctx->host_str = host;
     ctx->current_port = ctx->port;
     ctx->current_ttl = 1;
-    size_t *max_ttl = get_option_value(options, OPT_MAX_TTL);
-    ctx->max_ttl = *max_ttl;
     ctx->queries = 3;
     ctx->sim_queries = 16;
     ctx->timeout = 5;
@@ -49,7 +67,17 @@ t_context *init_ctx(t_option *options, char *host) {
     ctx->unreached_port_ttl = 0;
     ctx->next_hop = 0;
 
-    if (set_host_addr(ctx) != 0) {
+    t_option *no_rev_opt = get_option_by_index(options, OPT_NO_REVERSE);
+    if (no_rev_opt && no_rev_opt->is_set) {
+        ctx->no_reverse = true;
+    }
+
+    if (!set_max_ttl(ctx, get_option_value(options, OPT_MAX_TTL))) {
+        free_ctx(ctx);
+        return NULL;
+    }
+
+    if (!set_host_addr(ctx)) {
         free_ctx(ctx);
         return NULL;
     }

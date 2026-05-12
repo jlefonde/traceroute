@@ -20,7 +20,7 @@ int main(int argc, char **argv) {
     }
 
     char *host_ip = inet_ntoa(((struct sockaddr_in *)ctx->host_addr)->sin_addr);
-    printf("traceroute to %s (%s), %ld hops max, %ld bytes packets\n", ctx->host_str, host_ip, ctx->max_ttl, ctx->packet_len);
+    printf("traceroute to %s (%s), %d hops max, %ld bytes packets\n", ctx->host_str, host_ip, ctx->max_ttl, ctx->packet_len);
 
     fd_set read_fds; 
     struct timeval timeout;
