@@ -27,8 +27,11 @@
 
 typedef enum e_option_idx {
     OPT_HELP,
-    OPT_NO_REVERSE,
     OPT_MAX_TTL,
+    OPT_FIRST_TTL,
+    OPT_QUERIES,
+    OPT_SIM_QUERIES,
+    OPT_NO_REVERSE,
     OPT_COUNT, // Keep at the end of the enum
 } t_option_idx;
 
@@ -59,7 +62,7 @@ typedef struct s_icmp {
 } t_icmp;
 
 typedef struct s_probe {
-    size_t ttl;
+    int ttl;
     uint16_t dst_port;
     struct timeval send_time;
 } t_probe;
@@ -80,14 +83,15 @@ typedef struct s_context {
     struct sockaddr_storage *host_addr;
     socklen_t host_addr_len;
 
-    uint8_t max_ttl;
+    int max_ttl;
+    int first_ttl;
+    int current_ttl;
+    int queries;
+    int sim_queries;
     bool no_reverse;
 
     uint16_t port;
     uint16_t current_port;
-    size_t current_ttl;
-    size_t queries;
-    size_t sim_queries;
     size_t packet_len;
     size_t timeout;
 

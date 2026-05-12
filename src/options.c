@@ -8,18 +8,39 @@ t_option *init_options() {
             .description = "Print this help message and exit",
             .has_argument = false,
         },
-        [OPT_NO_REVERSE] = {
-            .short_opt = 'n',
-            .long_opt = "",
-            .description = "Do not perform reverse DNS lookup in hop display",
-            .has_argument = false,
+        [OPT_FIRST_TTL] = {
+            .short_opt = 'f',
+            .long_opt = "first-ttl",
+            .description = "Set the first TTL to start with",
+            .has_argument = true,
+            .meta = "first_ttl",
         },
         [OPT_MAX_TTL] = {
             .short_opt = 'm',
             .long_opt = "max-ttl",
-            .description = "Specifies the maximum number of hops (time-to-live) to be performed: [1,255]",
+            .description = "Set the maximum number of hops (TTL)",
             .has_argument = true,
             .meta = "max_ttl",
+        },
+        [OPT_QUERIES] = {
+            .short_opt = 'q',
+            .long_opt = "queries",
+            .description = "Set the number of probe packets per hop",
+            .has_argument = true,
+            .meta = "nqueries",
+        },
+        [OPT_SIM_QUERIES] = {
+            .short_opt = 'N',
+            .long_opt = "sim-queries",
+            .description = "Set the number of probe packets sent out simultaneously",
+            .has_argument = true,
+            .meta = "squeries",
+        },
+        [OPT_NO_REVERSE] = {
+            .short_opt = 'n',
+            .long_opt = "",
+            .description = "Disable reverse DNS lookup in hop display",
+            .has_argument = false,
         },
     };
 
@@ -117,11 +138,10 @@ t_option *get_option_by_index(t_option *options, t_option_idx idx) {
     return &options[idx];
 }
 
-char *get_option_value(t_option *options, t_option_idx idx) {
-    t_option *opt = get_option_by_index(options, idx);
-    if (!opt || !opt->has_argument) {
+char *get_option_value(t_option *option, t_option_idx idx) {
+    if (!option || !option->has_argument) {
         return NULL;
     }
 
-    return opt->value;
+    return option->value;
 }

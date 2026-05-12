@@ -67,7 +67,7 @@ void process_icmp_reply(t_context *ctx) {
         }
 
         size_t probe_id = probe_dst_port - ctx->port;
-        size_t probe_ttl = (probe_id / ctx->queries) + 1;
+        size_t probe_ttl = (probe_id / ctx->queries) + ctx->first_ttl;
         t_query *query = &ctx->hops[probe_ttl - 1].queries[probe_id % ctx->queries];
         if (!query->req || query->rep) {
             free(icmp);
@@ -77,7 +77,7 @@ void process_icmp_reply(t_context *ctx) {
         query->rep = icmp;
         query->rtt = get_elapsed_ms(query->req->send_time, recv_time);
 
-        if (!ctx->unreached_port_ttl && query->rep->hdr.type == ICMP_DEST_UNREACH && query->rep->hdr.code == ICMP_PORT_UNREACH) {
+        if (!ctx->unreached_port_ttl && query->rep->hdr.type == ICMP_DEST_UNREACH && query->rep->hdr.code == ICMP_PORT_UNREACH) {            
             ctx->unreached_port_ttl = probe_ttl;
         }
     }

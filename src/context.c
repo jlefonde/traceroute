@@ -3,18 +3,27 @@
 #define MIN_TTL_VALUE 1
 #define MAX_TTL_VALUE 255
 
-static bool set_max_ttl(t_context *ctx, char *max_ttl_str) {
-    if (!max_ttl_str) {
+static bool parse_int_arg(t_option *option, int min_val, int max_val, void *out, size_t out_size) {
+    if (!option->value) {
         return true;
     }
 
-    int max_ttl = ft_atoi(max_ttl_str);
-    if (max_ttl < MIN_TTL_VALUE || max_ttl > MAX_TTL_VALUE) {
-        fprintf(stderr, "error: max_ttl out of range [%d,%d]\n", MIN_TTL_VALUE, MAX_TTL_VALUE);
+    int val = ft_atoi(option->value);
+    if (val < min_val || val > max_val) {
+        fprintf(stderr, "error: %s out of range [%d,%d]\n", option->meta, min_val, max_val);
         return false;
     }
 
-    ctx->max_ttl = max_ttl;
+    if (out_size == sizeof(uint8_t)) {
+        *(uint8_t *)out = (uint8_t)val;
+    } else if (out_size == sizeof(uint16_t)) {
+        *(uint16_t *)out = (uint16_t)val;
+    } else if (out_size == sizeof(uint32_t)) {
+        *(uint32_t *)out = (uint32_t)val;
+    } else if (out_size == sizeof(uint64_t)) {
+        *(uint64_t *)out = (uint64_t)val;
+    }
+
     return true;
 }
 
@@ -54,28 +63,51 @@ t_context *init_ctx(t_option *options, char *host) {
     }
 
     ctx->max_ttl = 30;
-    ctx->no_reverse = false;
-
-    ctx->port = 33434;
-    ctx->host_str = host;
-    ctx->current_port = ctx->port;
-    ctx->current_ttl = 1;
+    ctx->first_ttl = 1;
     ctx->queries = 3;
     ctx->sim_queries = 16;
+    ctx->no_reverse = false;
+    
+    ctx->host_str = host;
+    ctx->port = 33434;
+    ctx->current_port = ctx->port;
     ctx->timeout = 5;
     ctx->packet_len = 60;
     ctx->unreached_port_ttl = 0;
-    ctx->next_hop = 0;
 
     t_option *no_rev_opt = get_option_by_index(options, OPT_NO_REVERSE);
     if (no_rev_opt && no_rev_opt->is_set) {
         ctx->no_reverse = true;
     }
 
-    if (!set_max_ttl(ctx, get_option_value(options, OPT_MAX_TTL))) {
+    if (!parse_int_arg(get_option_by_index(options, OPT_MAX_TTL), MIN_TTL_VALUE, MAX_TTL_VALUE, &ctx->max_ttl, sizeof(ctx->max_ttl))) {
         free_ctx(ctx);
         return NULL;
     }
+
+    if (!parse_int_arg(get_option_by_index(options, OPT_FIRST_TTL), MIN_TTL_VALUE, MAX_TTL_VALUE, &ctx->first_ttl, sizeof(ctx->first_ttl))) {
+        free_ctx(ctx);
+        return NULL;
+    }
+    
+    if (!parse_int_arg(get_option_by_index(options, OPT_QUERIES), 1, 10, &ctx->queries, sizeof(ctx->queries))) {
+        free_ctx(ctx);
+        return NULL;
+    }
+
+    if (!parse_int_arg(get_option_by_index(options, OPT_SIM_QUERIES), 1, 32, &ctx->sim_queries, sizeof(ctx->sim_queries))) {
+        free_ctx(ctx);
+        return NULL;
+    }
+
+    if (ctx->first_ttl > ctx->max_ttl) {
+        fprintf(stderr, "error: first_ttl out of range\n");
+        free_ctx(ctx);
+        return NULL;
+    }
+
+    ctx->current_ttl = ctx->first_ttl;
+    ctx->next_hop = ctx->first_ttl - 1;
 
     if (!set_host_addr(ctx)) {
         free_ctx(ctx);
