@@ -24,6 +24,14 @@
 # define ICMP_REPLY_MAX_LEN 576
 # define HOST_MAX_LEN 256
 
+typedef enum e_option_idx {
+    OPT_HELP,
+    OPT_NO_REVERSE,
+    OPT_COUNT, // Keep at the end of the enum
+} t_option_idx;
+
+typedef void* (*parser_fn)(const char *str);
+
 typedef struct s_option {
     const char short_opt;
     const char *long_opt;
@@ -33,7 +41,9 @@ typedef struct s_option {
     union {
         struct {
             const char *meta;
-            char *value;
+            char *raw;
+            void *value;
+            parser_fn parser;
         } arg;
 
         struct {
@@ -99,11 +109,16 @@ typedef struct s_context {
     bool unreachable_hop;
 } t_context;
 
-int parse_args(t_context *ctx, int argc, char **argv);
+t_option *init_options();
+int parse_short_option(t_option *options, char ***argv);
+int parse_long_option(t_option *options, char ***argv);
+int parse_args(int argc, char **argv, t_option *options, char **host);
 void print_helper(t_option *options);
+t_option *get_option_by_index(t_option *options, t_option_idx idx);
+void *get_option_value(t_option *options, t_option_idx idx);
 t_socket *init_udp_socket();
 t_socket *init_icmp_socket();
-t_context *init_ctx();
+t_context *init_ctx(t_option *options, char *host);
 void free_ctx(t_context *ctx);
 void free_socket(t_socket *sock);
 int send_probe(t_context *ctx);
@@ -114,5 +129,4 @@ void process_icmp_reply(t_context *ctx);
 double get_elapsed_ms(struct timeval start, struct timeval end);
 t_option *get_option_short(t_option *options, char opt);
 t_option *get_option_long(t_option *options, char *opt);
-
 #endif

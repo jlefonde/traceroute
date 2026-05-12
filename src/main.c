@@ -6,14 +6,16 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    t_context *ctx = init_ctx();
-    if (!ctx) {
+    t_option *options = init_options();
+
+    char *host = NULL;
+    int err = parse_args(argc, argv, options, &host);
+    if (err != 0) {
         return 1;
     }
 
-    int err = parse_args(ctx, argc, argv);
-    if (err != 0) {
-        free_ctx(ctx);
+    t_context *ctx = init_ctx(options, host);
+    if (!ctx) {
         return 1;
     }
 

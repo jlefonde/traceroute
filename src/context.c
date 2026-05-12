@@ -1,32 +1,42 @@
 #include "traceroute.h"
 
-static t_option *init_options() {
-    static t_option options[] = {
-        {
-            .short_opt = 'h',
-            .long_opt = "help",
-            .description = "Print this help message and exit",
-            .has_argument = false,
-        },
-        {
-            .short_opt = 'n',
-            .long_opt = "",
-            .description = "Do not perform reverse DNS lookup in hop display",
-            .has_argument = false,
-        },
+static int set_host_addr(t_context *ctx) {
+    struct addrinfo *res;
+    struct addrinfo hints = {
+        .ai_family = AF_INET,
+        .ai_socktype = SOCK_DGRAM,
+        .ai_flags = AI_ADDRCONFIG,
     };
 
-    return options;
+    int err_code = getaddrinfo(ctx->host_str, NULL, &hints, &res);
+    if (err_code != 0) {
+        fprintf(stderr, "error: '%s': %s\n", ctx->host_str, gai_strerror(err_code));
+        return -1;
+    }
+
+    ctx->host_addr_len = res->ai_addrlen;
+    ctx->host_addr = malloc(ctx->host_addr_len);
+    if (!ctx->host_addr) {
+        fprintf(stderr, "error: failed to allocate host address: %s\n", strerror(errno));
+        freeaddrinfo(res);
+        return -1;
+    }
+
+    ft_memcpy(ctx->host_addr, res->ai_addr, ctx->host_addr_len);
+
+    freeaddrinfo(res);
+    return 0;
 }
 
-t_context *init_ctx() {
+t_context *init_ctx(t_option *options, char *host) {
     t_context *ctx = ft_calloc(1, sizeof(t_context));
     if (!ctx) {
         fprintf(stderr, "error: failed to init context: %s\n", strerror(errno));
         return NULL;
     }
 
-    ctx->options = init_options();
+    ctx->options = options;
+    ctx->host_str = host;
     ctx->port = 33434;
     ctx->current_port = ctx->port;
     ctx->current_ttl = 1;
@@ -37,6 +47,11 @@ t_context *init_ctx() {
     ctx->packet_len = 60;
     ctx->unreached_port_ttl = 0;
     ctx->next_hop = 0;
+
+    if (set_host_addr(ctx) != 0) {
+        free_ctx(ctx);
+        return NULL;
+    }
 
     ctx->udp_sock = init_udp_socket();
     if (!ctx->udp_sock) {
