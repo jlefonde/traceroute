@@ -1,70 +1,123 @@
 #include "traceroute.h"
 
+static int get_active_query_idx(t_context *ctx) {
+    for (size_t i = 0; i < ctx->sim_queries; i++) {
+        if (ctx->active_queries[i] == NULL) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+static int get_send_sock_fd(t_context *ctx) {
+    switch (ctx->method) {
+        case MTD_ICMP: return ctx->icmp_sock->fd;  break;
+        default:
+            return ctx->udp_sock->fd;
+    }
+
+    return -1;
+}
+
+static int get_hop_query_idx(t_context *ctx) {
+    switch (ctx->method) {
+        case MTD_ICMP:
+            break;
+        default:
+            return (ctx->current_port - ctx->port) % ctx->queries;
+    }
+
+    return -1;
+}
+
+static t_probe *init_udp_probe(t_context *ctx) {
+    t_probe *probe = malloc(sizeof(t_probe));
+    if (!probe) {
+        return NULL; 
+    }
+
+    probe->ttl = ctx->current_ttl;
+    probe->udp.dst_port = ctx->current_port++;
+
+    return probe;
+}
+
+static t_probe *init_probe(t_context *ctx) {
+    switch (ctx->method) {
+        case MTD_ICMP:
+            break;
+        default:
+            return init_udp_probe(ctx);
+    }
+
+    return NULL;
+}
+
 int send_probe(t_context *ctx) {
     if (ctx->current_ttl > ctx->max_ttl) {
         return 0;
     }
 
-    if (ctx->unreached_port_ttl > 0 && ctx->current_ttl > ctx->unreached_port_ttl) {
+    if (ctx->method == MTD_DEFAULT && ctx->unreached_port_ttl > 0 && ctx->current_ttl > ctx->unreached_port_ttl) {
         return 0;
     }
 
-    int active_query_idx = -1;
-    for (size_t i = 0; i < ctx->sim_queries; i++) {
-        if (ctx->active_queries[i] == NULL) {
-            active_query_idx = i;
-            break;
-        }
-    }
-
+    int active_query_idx = get_active_query_idx(ctx);
     if (active_query_idx == -1) {
         return 0;
     }
 
-    t_probe *probe = malloc(sizeof(t_probe));
-    if (!probe) {
-        return -1; 
-    }
-
-    size_t hop_query_idx = (ctx->current_port - ctx->port) % ctx->queries;
+    size_t hop_query_idx = get_hop_query_idx(ctx);
     t_query *query = &ctx->hops[ctx->current_ttl - 1].queries[hop_query_idx];
 
-    probe->dst_port = ctx->current_port;
-    probe->ttl = ctx->current_ttl;
+    t_probe *probe = init_probe(ctx);
+    if (!probe) {
+        return -1;
+    }
+
     query->req = probe;
     ctx->active_queries[active_query_idx] = query;
 
-    ctx->current_port++;
     if (hop_query_idx == ctx->queries - 1) {
         ctx->current_ttl++;
     }
 
     struct sockaddr_in *host_addr = (struct sockaddr_in *)ctx->host_addr;
-    host_addr->sin_port = htons(probe->dst_port);
+    if (ctx->method == MTD_DEFAULT) {
+        host_addr->sin_port = htons(probe->udp.dst_port);
+    }
 
-    if (setsockopt(ctx->udp_sock->fd , IPPROTO_IP, IP_TTL, &probe->ttl, sizeof(probe->ttl)) == -1) {
+    if (gettimeofday(&probe->send_time, NULL) == -1) { 
+        return -1;
+    }
+
+    int send_sock_fd = get_send_sock_fd(ctx);
+    if (send_sock_fd == -1) {
+        return -1;
+    }
+
+    if (setsockopt(send_sock_fd , IPPROTO_IP, IP_TTL, &probe->ttl, sizeof(probe->ttl)) == -1) {
         return -1;
     }
 
     size_t hdr_len = sizeof(struct iphdr) + sizeof(struct udphdr);
     size_t payload_len = (ctx->packet_len > hdr_len) ? ctx->packet_len - hdr_len : 0;
-    uint8_t *payload = ft_calloc(payload_len, sizeof(uint8_t));
+    uint8_t *payload = malloc(sizeof(uint8_t) * payload_len);
     if (!payload) {
         return -1;
     }
 
-    if (gettimeofday(&probe->send_time, NULL) == -1) { 
-        free(payload);
-        return -1;
+    for (size_t i = 0; i < payload_len; i++) {
+        payload[i] = '@' + i;
     }
 
-    ssize_t bytes_sent = sendto(ctx->udp_sock->fd, payload, payload_len, 0, (struct sockaddr *)host_addr, ctx->host_addr_len);
-    if (bytes_sent == -1) {
-        free(payload);
-        return -1;
-    }
-
+    ssize_t bytes_sent = sendto(send_sock_fd, payload, payload_len, 0, (struct sockaddr *)host_addr, ctx->host_addr_len);
     free(payload);
+    if (bytes_sent == -1) {
+        return -1;
+    }
+
     return 1;
 }
 

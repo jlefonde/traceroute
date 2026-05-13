@@ -32,8 +32,14 @@ typedef enum e_option_idx {
     OPT_QUERIES,
     OPT_SIM_QUERIES,
     OPT_NO_REVERSE,
+    OPT_ICMP,
     OPT_COUNT, // Keep at the end of the enum
 } t_option_idx;
+
+typedef enum e_method {
+    MTD_DEFAULT,
+    MTD_ICMP,
+} t_method;
 
 typedef struct s_option {
     const char short_opt;
@@ -57,14 +63,28 @@ typedef struct s_icmp {
 
     struct {
         struct iphdr ip_hdr;
-        struct udphdr udp_hdr;
+
+        union {
+            struct udphdr udp_hdr;
+            struct icmphdr icmp_hdr;
+        };
     } data;
 } t_icmp;
 
+typedef struct s_udp {
+    uint16_t dst_port;
+} t_udp;
+
 typedef struct s_probe {
     int ttl;
-    uint16_t dst_port;
     struct timeval send_time;
+
+    union
+    {
+        t_udp udp;
+        t_icmp icmp;
+    };
+    
 } t_probe;
 
 typedef struct s_query {
@@ -83,12 +103,13 @@ typedef struct s_context {
     struct sockaddr_storage *host_addr;
     socklen_t host_addr_len;
 
-    int max_ttl;
-    int first_ttl;
     int current_ttl;
-    int queries;
-    int sim_queries;
+    uint8_t max_ttl;
+    uint8_t first_ttl;
+    uint8_t queries;
+    uint8_t sim_queries;
     bool no_reverse;
+    t_method method;
 
     uint16_t port;
     uint16_t current_port;

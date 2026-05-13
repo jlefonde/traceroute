@@ -8,7 +8,7 @@ SOURCES = main.c parse_args.c socket.c icmp.c context.c hop.c options.c
 
 OBJECTS = $(addprefix $(OBJECTS_DIR)/, $(SOURCES:.c=.o))
 
-CFLAGS = -I$(HEADERS_DIR) #-Wall -Wextra -Werror
+CFLAGS = -I$(HEADERS_DIR) -g #-Wall -Wextra -Werror
 LDFLAGS = -L./libft -lft -lm
 
 all: ./libft/libft.a $(NAME)

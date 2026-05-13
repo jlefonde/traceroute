@@ -36,6 +36,12 @@ t_option *init_options() {
             .has_argument = true,
             .meta = "squeries",
         },
+        [OPT_ICMP] = {
+            .short_opt = 'I',
+            .long_opt = "icmp",
+            .description = "Use ICMP ECHO for tracerouting",
+            .has_argument = false,
+        },
         [OPT_NO_REVERSE] = {
             .short_opt = 'n',
             .long_opt = "",

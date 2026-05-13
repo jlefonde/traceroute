@@ -67,7 +67,8 @@ t_context *init_ctx(t_option *options, char *host) {
     ctx->queries = 3;
     ctx->sim_queries = 16;
     ctx->no_reverse = false;
-    
+    ctx->method = MTD_DEFAULT;
+
     ctx->host_str = host;
     ctx->port = 33434;
     ctx->current_port = ctx->port;
@@ -89,7 +90,7 @@ t_context *init_ctx(t_option *options, char *host) {
         free_ctx(ctx);
         return NULL;
     }
-    
+
     if (!parse_int_arg(get_option_by_index(options, OPT_QUERIES), 1, 10, &ctx->queries, sizeof(ctx->queries))) {
         free_ctx(ctx);
         return NULL;
@@ -109,15 +110,22 @@ t_context *init_ctx(t_option *options, char *host) {
     ctx->current_ttl = ctx->first_ttl;
     ctx->next_hop = ctx->first_ttl - 1;
 
+    t_option *icmp = get_option_by_index(options, OPT_ICMP);
+    if (icmp && icmp->is_set) {
+        ctx->method = MTD_ICMP;
+    }
+
     if (!set_host_addr(ctx)) {
         free_ctx(ctx);
         return NULL;
     }
 
-    ctx->udp_sock = init_udp_socket();
-    if (!ctx->udp_sock) {
-        free_ctx(ctx);
-        return NULL;
+    if (ctx->method == MTD_DEFAULT) {
+        ctx->udp_sock = init_udp_socket();
+        if (!ctx->udp_sock) {
+            free_ctx(ctx);
+            return NULL;
+        }
     }
 
     ctx->icmp_sock = init_icmp_socket();
