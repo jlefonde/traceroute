@@ -62,6 +62,8 @@ t_context *init_ctx(t_option *options, char *host) {
         return NULL;
     }
 
+    ctx->pid = getpid();
+    ctx->current_seq = 1;
     ctx->max_ttl = 30;
     ctx->first_ttl = 1;
     ctx->queries = 3;

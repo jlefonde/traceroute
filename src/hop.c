@@ -10,16 +10,6 @@ static int get_active_query_idx(t_context *ctx) {
     return -1;
 }
 
-static int get_send_sock_fd(t_context *ctx) {
-    switch (ctx->method) {
-        case MTD_ICMP: return ctx->icmp_sock->fd;  break;
-        default:
-            return ctx->udp_sock->fd;
-    }
-
-    return -1;
-}
-
 static int get_hop_query_idx(t_context *ctx) {
     switch (ctx->method) {
         case MTD_ICMP:
@@ -31,24 +21,48 @@ static int get_hop_query_idx(t_context *ctx) {
     return -1;
 }
 
-static t_probe *init_udp_probe(t_context *ctx) {
+static t_probe *init_udp_probe(t_context *ctx, uint8_t *payload, size_t payload_len) {
     t_probe *probe = malloc(sizeof(t_probe));
     if (!probe) {
         return NULL; 
     }
 
+    probe->send_sock_fd = ctx->udp_sock->fd;
     probe->ttl = ctx->current_ttl;
     probe->udp.dst_port = ctx->current_port++;
+    probe->udp.payload = payload;
+    probe->udp.payload_len = payload_len;
 
     return probe;
 }
 
-static t_probe *init_probe(t_context *ctx) {
+static t_probe *init_icmp_probe(t_context *ctx, uint8_t *payload, size_t payload_len) {
+    t_probe *probe = malloc(sizeof(t_probe));
+    if (!probe) {
+        return NULL; 
+    }
+
+    probe->send_sock_fd = ctx->icmp_sock->fd;
+    probe->ttl = ctx->current_ttl;
+    probe->icmp.hdr.type = ICMP_ECHO;
+    probe->icmp.hdr.code = 0;
+    probe->icmp.hdr.un.echo.id = ctx->pid;
+    probe->icmp.hdr.un.echo.sequence = ctx->current_seq++;
+    probe->icmp.hdr.checksum = 0;
+    probe->icmp.un.req.payload = payload;
+    probe->icmp.un.req.payload_len = payload_len;
+
+    set_icmp_checksum(probe);
+
+    return probe;
+}
+
+static t_probe *init_probe(t_context *ctx, uint8_t *payload, size_t payload_len) {
     switch (ctx->method) {
         case MTD_ICMP:
-            break;
+            return init_icmp_probe(ctx, payload, payload_len);
         default:
-            return init_udp_probe(ctx);
+            return init_udp_probe(ctx, payload, payload_len);
     }
 
     return NULL;
@@ -71,36 +85,6 @@ int send_probe(t_context *ctx) {
     size_t hop_query_idx = get_hop_query_idx(ctx);
     t_query *query = &ctx->hops[ctx->current_ttl - 1].queries[hop_query_idx];
 
-    t_probe *probe = init_probe(ctx);
-    if (!probe) {
-        return -1;
-    }
-
-    query->req = probe;
-    ctx->active_queries[active_query_idx] = query;
-
-    if (hop_query_idx == ctx->queries - 1) {
-        ctx->current_ttl++;
-    }
-
-    struct sockaddr_in *host_addr = (struct sockaddr_in *)ctx->host_addr;
-    if (ctx->method == MTD_DEFAULT) {
-        host_addr->sin_port = htons(probe->udp.dst_port);
-    }
-
-    if (gettimeofday(&probe->send_time, NULL) == -1) { 
-        return -1;
-    }
-
-    int send_sock_fd = get_send_sock_fd(ctx);
-    if (send_sock_fd == -1) {
-        return -1;
-    }
-
-    if (setsockopt(send_sock_fd , IPPROTO_IP, IP_TTL, &probe->ttl, sizeof(probe->ttl)) == -1) {
-        return -1;
-    }
-
     size_t hdr_len = sizeof(struct iphdr) + sizeof(struct udphdr);
     size_t payload_len = (ctx->packet_len > hdr_len) ? ctx->packet_len - hdr_len : 0;
     uint8_t *payload = malloc(sizeof(uint8_t) * payload_len);
@@ -112,7 +96,35 @@ int send_probe(t_context *ctx) {
         payload[i] = '@' + i;
     }
 
-    ssize_t bytes_sent = sendto(send_sock_fd, payload, payload_len, 0, (struct sockaddr *)host_addr, ctx->host_addr_len);
+    t_probe *probe = init_probe(ctx, payload, payload_len);
+    if (!probe) {
+        free(payload);
+        return -1;
+    }
+    
+    query->req = probe;
+    ctx->active_queries[active_query_idx] = query;
+    
+    if (hop_query_idx == ctx->queries - 1) {
+        ctx->current_ttl++;
+    }
+    
+    struct sockaddr_in *host_addr = (struct sockaddr_in *)ctx->host_addr;
+    if (ctx->method == MTD_DEFAULT) {
+        host_addr->sin_port = htons(probe->udp.dst_port);
+    }
+
+    if (setsockopt(probe->send_sock_fd , IPPROTO_IP, IP_TTL, &probe->ttl, sizeof(probe->ttl)) == -1) {
+        free(payload);
+        return -1;
+    }
+
+    if (gettimeofday(&probe->send_time, NULL) == -1) {
+        free(payload);
+        return -1;
+    }
+
+    ssize_t bytes_sent = sendto(probe->send_sock_fd, payload, payload_len, 0, (struct sockaddr *)host_addr, ctx->host_addr_len);
     free(payload);
     if (bytes_sent == -1) {
         return -1;

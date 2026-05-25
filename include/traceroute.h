@@ -57,27 +57,43 @@ typedef struct s_socket {
     struct sockaddr_storage *addr;
 } t_socket;
 
+typedef struct s_icmp_rep {
+    struct iphdr ip_hdr;
+
+    union {
+        struct udphdr udp_hdr;
+        struct icmphdr icmp_hdr;
+    };
+
+    uint8_t *payload;
+    size_t payload_len;
+} t_icmp_rep;
+
+typedef struct s_icmp_req {
+    uint8_t *payload;
+    size_t payload_len;
+} t_icmp_req;
+
 typedef struct s_icmp {
     struct iphdr ip_hdr;
     struct icmphdr hdr;
 
-    struct {
-        struct iphdr ip_hdr;
-
-        union {
-            struct udphdr udp_hdr;
-            struct icmphdr icmp_hdr;
-        };
-    } data;
+    union {
+        t_icmp_req req;
+        t_icmp_rep rep;
+    } un;
 } t_icmp;
 
 typedef struct s_udp {
     uint16_t dst_port;
+    uint8_t *payload;
+    size_t payload_len;
 } t_udp;
 
 typedef struct s_probe {
     int ttl;
     struct timeval send_time;
+    int send_sock_fd;
 
     union
     {
@@ -102,7 +118,9 @@ typedef struct s_context {
     char *host_str;
     struct sockaddr_storage *host_addr;
     socklen_t host_addr_len;
+    pid_t pid;
 
+    int current_seq;
     int current_ttl;
     uint8_t max_ttl;
     uint8_t first_ttl;
@@ -146,4 +164,6 @@ void process_icmp_reply(t_context *ctx);
 double get_elapsed_ms(struct timeval start, struct timeval end);
 t_option *get_option_short(t_option *options, char opt);
 t_option *get_option_long(t_option *options, char *opt);
+void set_icmp_checksum(t_probe *probe);
+
 #endif

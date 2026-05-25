@@ -56,15 +56,15 @@ int parse_args(int argc, char **argv, t_option *options, char **host) {
         }
     }
 
-    if (!*host) {
-        fprintf(stderr, "error: missing \"host\" argument\n");
-        return -1;
-    }
-
     t_option *help = get_option_by_index(options, OPT_HELP);
     if (help && help->is_set) {
         print_helper(options);
         exit(EXIT_SUCCESS);
+    }
+
+    if (!*host) {
+        fprintf(stderr, "error: missing \"host\" argument\n");
+        return -1;
     }
 
     return 0;
