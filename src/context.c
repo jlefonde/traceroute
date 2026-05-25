@@ -162,6 +162,34 @@ t_context *init_ctx(t_option *options, char *host) {
     return ctx;
 }
 
+void free_hops(t_context *ctx) {
+    for (size_t i = 0; i < ctx->max_ttl; i++) {
+        if (!ctx->hops[i].queries) {
+            continue;
+        }
+
+        for (size_t j = 0; j < ctx->queries; j++) {
+            free(ctx->hops[i].queries[j].rep);
+
+            t_probe *req = ctx->hops[i].queries[j].req;
+            if (!req) {
+                continue;
+            }
+            
+            switch (ctx->method) {
+                case MTD_ICMP: free(req->icmp.payload); break;
+                default: free(req->udp.payload);
+            }
+
+            free(req);
+        }
+
+        free(ctx->hops[i].queries);
+    }
+
+    free(ctx->hops);
+}
+
 void free_ctx(t_context *ctx) {
     free(ctx->host_addr);
     free(ctx->active_queries);
@@ -170,17 +198,7 @@ void free_ctx(t_context *ctx) {
     free_socket(ctx->icmp_sock);
 
     if (ctx->hops) {
-        for (size_t i = 0; i < ctx->max_ttl; i++) {
-            if (ctx->hops[i].queries) {
-                for (size_t j = 0; j < ctx->queries; j++) {
-                    free(ctx->hops[i].queries[j].req);
-                    free(ctx->hops[i].queries[j].rep);
-                }
-                free(ctx->hops[i].queries);
-            }
-        }
-
-        free(ctx->hops);
+        // free_hops(ctx);
     }
 
     free(ctx);

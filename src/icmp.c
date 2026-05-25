@@ -23,11 +23,11 @@ static t_icmp *init_icmp(uint8_t *icmp_raw, size_t icmp_raw_size) {
         return NULL;
     }
 
-    ft_memcpy(&icmp->un.rep.ip_hdr, icmp_raw + data_offset, sizeof(struct iphdr));
-    size_t inner_ip_len = icmp->un.rep.ip_hdr.ihl * 4;
+    ft_memcpy(&icmp->inner.ip_hdr, icmp_raw + data_offset, sizeof(struct iphdr));
+    size_t inner_ip_len = icmp->inner.ip_hdr.ihl * 4;
 
     data_offset += inner_ip_len;
-    ft_memcpy(&icmp->un.rep.udp_hdr, icmp_raw + data_offset, sizeof(struct udphdr));
+    ft_memcpy(&icmp->inner.udp_hdr, icmp_raw + data_offset, sizeof(struct udphdr));
 
     return icmp;
 }
@@ -41,8 +41,8 @@ double get_elapsed_ms(struct timeval start, struct timeval end) {
 
 void set_icmp_checksum(t_probe *probe) {
     uint16_t sum = 0;
-    uint8_t *payload = probe->icmp.un.req.payload;
-    size_t payload_len = probe->icmp.un.req.payload_len;
+    uint8_t *payload = probe->icmp.payload;
+    size_t payload_len = probe->icmp.payload_len;
 
     sum += (probe->icmp.hdr.type << 8) + probe->icmp.hdr.code;
     sum += probe->icmp.hdr.un.echo.id;
@@ -70,12 +70,12 @@ void process_icmp_reply(t_context *ctx) {
         }
 
         struct sockaddr_in *udp_addr = (struct sockaddr_in *)ctx->udp_sock->addr;
-        if (udp_addr->sin_port != icmp->un.rep.udp_hdr.source) {
+        if (udp_addr->sin_port != icmp->inner.udp_hdr.source) {
             free(icmp);
             return;
         }
 
-        size_t probe_dst_port = ntohs(icmp->un.rep.udp_hdr.dest);
+        size_t probe_dst_port = ntohs(icmp->inner.udp_hdr.dest);
         if (probe_dst_port < ctx->port || probe_dst_port >= ctx->port + (ctx->max_ttl * ctx->queries)) {
             free(icmp);
             return;

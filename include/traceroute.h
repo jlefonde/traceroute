@@ -57,31 +57,20 @@ typedef struct s_socket {
     struct sockaddr_storage *addr;
 } t_socket;
 
-typedef struct s_icmp_rep {
-    struct iphdr ip_hdr;
-
-    union {
-        struct udphdr udp_hdr;
-        struct icmphdr icmp_hdr;
-    };
-
-    uint8_t *payload;
-    size_t payload_len;
-} t_icmp_rep;
-
-typedef struct s_icmp_req {
-    uint8_t *payload;
-    size_t payload_len;
-} t_icmp_req;
-
 typedef struct s_icmp {
     struct iphdr ip_hdr;
     struct icmphdr hdr;
 
-    union {
-        t_icmp_req req;
-        t_icmp_rep rep;
-    } un;
+    struct {
+        struct iphdr ip_hdr;
+        union {
+            struct udphdr udp_hdr;
+            struct icmphdr icmp_hdr;
+        };
+    } inner;
+
+    uint8_t *payload;
+    size_t payload_len;
 } t_icmp;
 
 typedef struct s_udp {
@@ -100,7 +89,6 @@ typedef struct s_probe {
         t_udp udp;
         t_icmp icmp;
     };
-    
 } t_probe;
 
 typedef struct s_query {
