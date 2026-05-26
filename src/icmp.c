@@ -40,18 +40,24 @@ double get_elapsed_ms(struct timeval start, struct timeval end) {
 }
 
 void set_icmp_checksum(t_probe *probe) {
-    uint16_t sum = 0;
+    uint32_t sum = 0;
     uint8_t *payload = probe->icmp.payload;
     size_t payload_len = probe->icmp.payload_len;
 
     sum += (probe->icmp.hdr.type << 8) + probe->icmp.hdr.code;
-    sum += probe->icmp.hdr.un.echo.id;
-    sum += probe->icmp.hdr.un.echo.sequence;
+
+    sum += htons(probe->icmp.hdr.un.echo.id);
+    sum += htons(probe->icmp.hdr.un.echo.sequence);
+
     for (size_t i = 0; i < payload_len; i += 2) {
-        sum += (payload[i] << 8) + (i + 1 < payload_len ? payload[i + 1] : 0);
+        sum += (payload[i] << 8) | (i + 1 < payload_len ? payload[i + 1] : 0);
     }
 
-    probe->icmp.hdr.checksum = ~sum;
+    while (sum >> 16) {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+
+    probe->icmp.hdr.checksum = htons(~sum);
 }
 
 void process_icmp_reply(t_context *ctx) {

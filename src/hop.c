@@ -48,8 +48,8 @@ static t_probe *init_icmp_probe(t_context *ctx, uint8_t *payload, size_t payload
     probe->ttl = ctx->current_ttl;
     probe->icmp.hdr.type = ICMP_ECHO;
     probe->icmp.hdr.code = 0;
-    probe->icmp.hdr.un.echo.id = ctx->pid;
-    probe->icmp.hdr.un.echo.sequence = ctx->current_seq++;
+    probe->icmp.hdr.un.echo.id = ntohs(ctx->pid);
+    probe->icmp.hdr.un.echo.sequence = ntohs(ctx->current_seq++);
     probe->icmp.hdr.checksum = 0;
     probe->icmp.payload = payload;
     probe->icmp.payload_len = payload_len;
@@ -79,6 +79,48 @@ static t_probe *init_probe(t_context *ctx) {
     }
 
     return NULL;
+}
+
+int send_icmp_probe(t_context *ctx, t_probe *probe) {
+    size_t buffer_len = sizeof(probe->icmp.hdr) + probe->icmp.payload_len;
+    uint8_t *buffer = malloc(buffer_len);
+    if (!buffer) {
+        return -1;
+    }
+
+    ft_memcpy(buffer, &probe->icmp.hdr, sizeof(probe->icmp.hdr));
+    ft_memcpy(buffer + sizeof(probe->icmp.hdr), probe->icmp.payload, probe->icmp.payload_len);
+
+    struct sockaddr_in *host_addr = (struct sockaddr_in *)ctx->host_addr;
+
+    if (gettimeofday(&probe->send_time, NULL) == -1) {
+        free(buffer);
+        return -1;
+    }
+
+    ssize_t bytes_sent = sendto(probe->send_sock_fd, buffer, buffer_len, 0, (struct sockaddr *)host_addr, ctx->host_addr_len);
+    free(buffer);
+    if (bytes_sent == -1) {
+        return -1;
+    }
+
+    return 1;
+}
+
+int send_udp_probe(t_context *ctx, t_probe *probe) {
+    struct sockaddr_in *host_addr = (struct sockaddr_in *)ctx->host_addr;
+    host_addr->sin_port = htons(probe->udp.dst_port);
+
+    if (gettimeofday(&probe->send_time, NULL) == -1) {
+        return -1;
+    }
+
+    ssize_t bytes_sent = sendto(probe->send_sock_fd, probe->udp.payload, probe->udp.payload_len, 0, (struct sockaddr *)host_addr, ctx->host_addr_len);
+    if (bytes_sent == -1) {
+        return -1;
+    }
+
+    return 1;
 }
 
 int send_probe(t_context *ctx) {
@@ -116,23 +158,11 @@ int send_probe(t_context *ctx) {
 
     switch (ctx->method) {
         case MTD_ICMP:
-            return 1;
+            return send_icmp_probe(ctx, probe);
         case MTD_DEFAULT:
         default:
-            struct sockaddr_in *host_addr = (struct sockaddr_in *)ctx->host_addr;
-            host_addr->sin_port = htons(probe->udp.dst_port);
-
-            if (gettimeofday(&probe->send_time, NULL) == -1) {
-                return -1;
-            }
-
-            ssize_t bytes_sent = sendto(probe->send_sock_fd, probe->udp.payload, probe->udp.payload_len, 0, (struct sockaddr *)host_addr, ctx->host_addr_len);
-            if (bytes_sent == -1) {
-                return -1;
-            }
+            return send_udp_probe(ctx, probe);
     }
-
-    return 1;
 }
 
 void update_active_queries(t_context *ctx) {
