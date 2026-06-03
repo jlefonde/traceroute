@@ -10,37 +10,56 @@ static int get_active_query_idx(t_context *ctx) {
     return -1;
 }
 
-static int get_hop_query_idx(t_context *ctx) {
-    switch (ctx->method) {
-        case MTD_ICMP:
-            break;
-        default:
-            return (ctx->current_port - ctx->port) % ctx->queries;
+static int set_payload(t_context *ctx, uint8_t **payload, size_t *payload_len) {
+    size_t hdr_len = sizeof(struct iphdr) + sizeof(struct udphdr);
+    *payload_len = (ctx->packet_len > hdr_len) ? ctx->packet_len - hdr_len : 0;
+    *payload = malloc(sizeof(uint8_t) * *payload_len);
+    if (!*payload) {
+        return -1;
     }
 
-    return -1;
+    for (size_t i = 0; i < *payload_len; i++) {
+        (*payload)[i] = '@' + i;
+    }
+
+    return 0;
 }
 
-static t_probe *init_udp_probe(t_context *ctx, uint8_t *payload, size_t payload_len) {
+static int set_icmp_buffer(t_probe *probe, uint8_t **buffer, size_t *buffer_len) {
+    *buffer_len = sizeof(probe->icmp.hdr) + probe->icmp.payload_len;
+    *buffer = malloc(*buffer_len);
+    if (!*buffer) {
+        return -1;
+    }
+
+    ft_memcpy(*buffer, &probe->icmp.hdr, sizeof(probe->icmp.hdr));
+    ft_memcpy(*buffer + sizeof(probe->icmp.hdr), probe->icmp.payload, probe->icmp.payload_len);
+
+    return 0;
+}
+
+static t_probe *init_udp_probe(t_context *ctx) {
     t_probe *probe = malloc(sizeof(t_probe));
     if (!probe) {
-        free(payload);
         return NULL; 
     }
 
+    
     probe->send_sock_fd = ctx->udp_sock->fd;
     probe->ttl = ctx->current_ttl;
     probe->udp.dst_port = ctx->current_port++;
-    probe->udp.payload = payload;
-    probe->udp.payload_len = payload_len;
+
+    if (set_payload(ctx, &probe->udp.payload, &probe->udp.payload_len) == -1) {
+        free(probe);
+        return NULL;
+    }
 
     return probe;
 }
 
-static t_probe *init_icmp_probe(t_context *ctx, uint8_t *payload, size_t payload_len) {
+static t_probe *init_icmp_probe(t_context *ctx) {
     t_probe *probe = malloc(sizeof(t_probe));
     if (!probe) {
-        free(payload);
         return NULL; 
     }
 
@@ -51,45 +70,52 @@ static t_probe *init_icmp_probe(t_context *ctx, uint8_t *payload, size_t payload
     probe->icmp.hdr.un.echo.id = ntohs(ctx->pid);
     probe->icmp.hdr.un.echo.sequence = ntohs(ctx->current_seq++);
     probe->icmp.hdr.checksum = 0;
-    probe->icmp.payload = payload;
-    probe->icmp.payload_len = payload_len;
+
+    if (set_payload(ctx, &probe->icmp.payload, &probe->icmp.payload_len) == -1) {
+        free(probe);
+        return NULL;
+    }
 
     set_icmp_checksum(probe);
 
     return probe;
 }
 
-static t_probe *init_probe(t_context *ctx) {
-    size_t hdr_len = sizeof(struct iphdr) + sizeof(struct udphdr);
-    size_t payload_len = (ctx->packet_len > hdr_len) ? ctx->packet_len - hdr_len : 0;
-    uint8_t *payload = malloc(sizeof(uint8_t) * payload_len);
-    if (!payload) {
+static t_probe *init_probe(t_context *ctx, size_t active_query_idx, size_t hop_query_idx, t_probe *(*init_func)(t_context *)) {
+    t_query *query = &ctx->hops[ctx->current_ttl - 1].queries[hop_query_idx];
+    
+    t_probe *probe = init_func(ctx);
+    if (!probe) {
         return NULL;
     }
 
-    for (size_t i = 0; i < payload_len; i++) {
-        payload[i] = '@' + i;
+    query->req = probe;
+    ctx->active_queries[active_query_idx] = query;
+    
+    if (hop_query_idx == ctx->queries - 1) {
+        ctx->current_ttl++;
     }
 
-    switch (ctx->method) {
-        case MTD_ICMP:
-            return init_icmp_probe(ctx, payload, payload_len);
-        default:
-            return init_udp_probe(ctx, payload, payload_len);
+    if (setsockopt(probe->send_sock_fd , IPPROTO_IP, IP_TTL, &probe->ttl, sizeof(probe->ttl)) == -1) {
+        free(probe);
+        return NULL;
     }
 
-    return NULL;
+    return probe;
 }
 
-int send_icmp_probe(t_context *ctx, t_probe *probe) {
-    size_t buffer_len = sizeof(probe->icmp.hdr) + probe->icmp.payload_len;
-    uint8_t *buffer = malloc(buffer_len);
-    if (!buffer) {
+int send_icmp_probe(t_context *ctx, size_t active_query_idx) {
+    t_probe *probe = init_probe(ctx, active_query_idx, (ctx->current_seq - 1) % ctx->queries, init_icmp_probe);
+    if (!probe) {
         return -1;
     }
 
-    ft_memcpy(buffer, &probe->icmp.hdr, sizeof(probe->icmp.hdr));
-    ft_memcpy(buffer + sizeof(probe->icmp.hdr), probe->icmp.payload, probe->icmp.payload_len);
+    uint8_t *buffer;
+    size_t buffer_len;
+    if (set_icmp_buffer(probe, &buffer, &buffer_len) == -1) {
+        free(probe);
+        return -1;
+    }
 
     struct sockaddr_in *host_addr = (struct sockaddr_in *)ctx->host_addr;
 
@@ -107,7 +133,16 @@ int send_icmp_probe(t_context *ctx, t_probe *probe) {
     return 1;
 }
 
-int send_udp_probe(t_context *ctx, t_probe *probe) {
+int send_udp_probe(t_context *ctx, size_t active_query_idx) {
+    if (ctx->unreached_port_ttl > 0 && ctx->current_ttl > ctx->unreached_port_ttl) {
+        return 0;
+    }
+
+    t_probe *probe = init_probe(ctx, active_query_idx, (ctx->current_port - ctx->port) % ctx->queries, init_udp_probe);
+    if (!probe) {
+        return -1;
+    }
+
     struct sockaddr_in *host_addr = (struct sockaddr_in *)ctx->host_addr;
     host_addr->sin_port = htons(probe->udp.dst_port);
 
@@ -128,40 +163,17 @@ int send_probe(t_context *ctx) {
         return 0;
     }
 
-    if (ctx->method == MTD_DEFAULT && ctx->unreached_port_ttl > 0 && ctx->current_ttl > ctx->unreached_port_ttl) {
-        return 0;
-    }
-
     int active_query_idx = get_active_query_idx(ctx);
     if (active_query_idx == -1) {
         return 0;
     }
 
-    size_t hop_query_idx = get_hop_query_idx(ctx);
-    t_query *query = &ctx->hops[ctx->current_ttl - 1].queries[hop_query_idx];
-    
-    t_probe *probe = init_probe(ctx);
-    if (!probe) {
-        return -1;
-    }
-
-    query->req = probe;
-    ctx->active_queries[active_query_idx] = query;
-    
-    if (hop_query_idx == ctx->queries - 1) {
-        ctx->current_ttl++;
-    }
-
-    if (setsockopt(probe->send_sock_fd , IPPROTO_IP, IP_TTL, &probe->ttl, sizeof(probe->ttl)) == -1) {
-        return -1;
-    }
-
     switch (ctx->method) {
         case MTD_ICMP:
-            return send_icmp_probe(ctx, probe);
+            return send_icmp_probe(ctx, active_query_idx);
         case MTD_DEFAULT:
         default:
-            return send_udp_probe(ctx, probe);
+            return send_udp_probe(ctx, active_query_idx);
     }
 }
 
