@@ -198,7 +198,7 @@ void free_ctx(t_context *ctx) {
     free_socket(ctx->icmp_sock);
 
     if (ctx->hops) {
-        // free_hops(ctx);
+        free_hops(ctx);
     }
 
     free(ctx);
