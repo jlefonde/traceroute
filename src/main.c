@@ -40,7 +40,7 @@ int main(int argc, char **argv) {
         update_active_queries(ctx);
         print_available_hops(ctx);
 
-        if ((ctx->unreached_port_ttl > 0 && ctx->next_hop >= ctx->unreached_port_ttl) || 
+        if ((ctx->final_ttl > 0 && ctx->next_hop >= ctx->final_ttl) || 
                 ctx->unreachable_hop ||
                 ctx->next_hop >= ctx->max_ttl) {
             break;

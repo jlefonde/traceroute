@@ -35,7 +35,9 @@ static int parse_icmp_inner_udp(t_icmp *icmp, uint8_t *icmp_raw, size_t offset, 
 static t_icmp *init_icmp_reply(uint8_t *icmp_raw, size_t icmp_raw_size, 
                                int (*parse_inner_hdr)(t_icmp *, uint8_t *, size_t, size_t)) {
     t_icmp *icmp = malloc(sizeof(t_icmp));
-    if (!icmp) return NULL;
+    if (!icmp) {
+        return NULL;
+    }
 
     if (icmp_raw_size < sizeof(struct iphdr)) {
         free(icmp);
@@ -53,33 +55,44 @@ static t_icmp *init_icmp_reply(uint8_t *icmp_raw, size_t icmp_raw_size,
     ft_memcpy(&icmp->hdr, icmp_raw + offset, sizeof(struct icmphdr));
     offset += sizeof(struct icmphdr);
 
-    if (parse_icmp_inner(icmp, icmp_raw, offset, icmp_raw_size, parse_inner_hdr) == -1) {
-        free(icmp);
-        return NULL;
+    if (icmp->hdr.type == ICMP_TIME_EXCEEDED || icmp->hdr.type == ICMP_DEST_UNREACH) {
+        if (parse_icmp_inner(icmp, icmp_raw, offset, icmp_raw_size, parse_inner_hdr) == -1) {
+            free(icmp);
+            return NULL;
+        }
     }
 
     return icmp;
 }
 
+static int get_echo_probe_id(t_context *ctx, uint16_t id, uint16_t seq) {
+    if (id != htons(ctx->pid)) {
+        return -1;
+    }
+
+    size_t sequence = ntohs(seq);
+    if (sequence == 0 || sequence > (ctx->max_ttl * ctx->queries)) {
+        return -1;
+    }
+
+    return sequence - 1;
+}
 
 static int get_icmp_probe_id(t_context *ctx, t_icmp *icmp) {
-    if (icmp->inner.icmp_hdr.type != ICMP_ECHO && icmp->inner.icmp_hdr.type != ICMP_ECHOREPLY) {
-        return -1;
+    if (icmp->hdr.type == ICMP_ECHOREPLY) {
+        return get_echo_probe_id(ctx, icmp->hdr.un.echo.id, icmp->hdr.un.echo.sequence);
+    } else if (icmp->hdr.type == ICMP_TIME_EXCEEDED && icmp->inner.icmp_hdr.type == ICMP_ECHO) {
+        return get_echo_probe_id(ctx, icmp->inner.icmp_hdr.un.echo.id, icmp->inner.icmp_hdr.un.echo.sequence);
     }
 
-    if (icmp->inner.icmp_hdr.un.echo.id != htons(ctx->pid)) {
-        return -1;
-    }
-
-    size_t seq = ntohs(icmp->inner.icmp_hdr.un.echo.sequence);
-    if (seq == 0 || seq > (ctx->max_ttl * ctx->queries)) {
-        return -1;
-    }
-
-    return seq - 1;
+    return -1;
 }
 
 static int get_udp_probe_id(t_context *ctx, t_icmp *icmp) {
+    if (icmp->hdr.type != ICMP_TIME_EXCEEDED && icmp->hdr.type != ICMP_DEST_UNREACH) {
+        return -1;
+    }
+
     struct sockaddr_in *udp_addr = (struct sockaddr_in *)ctx->udp_sock->addr;
     if (udp_addr->sin_port != icmp->inner.udp_hdr.source) {
         return -1;
@@ -102,6 +115,14 @@ static t_query *get_hop_query(t_context *ctx, t_icmp *icmp, size_t probe_id) {
     }
 
     return query;
+}
+
+static bool is_final_reply(t_context *ctx, t_icmp *icmp) {
+    if (ctx->method == MTD_ICMP) {
+        return icmp->hdr.type == ICMP_ECHOREPLY && icmp->hdr.code == 0;
+    } else {
+        return icmp->hdr.type == ICMP_DEST_UNREACH && icmp->hdr.code == ICMP_PORT_UNREACH;
+    }
 }
 
 double get_elapsed_ms(struct timeval start, struct timeval end) {
@@ -132,54 +153,6 @@ void set_icmp_checksum(t_probe *probe) {
     probe->icmp.hdr.checksum = htons(~sum);
 }
 
-void process_icmp_reply_icmp(t_context *ctx, uint8_t *icmp_raw, ssize_t bytes_received, struct timeval recv_time) {
-    t_icmp *icmp = init_icmp_reply(icmp_raw, (size_t)bytes_received, parse_icmp_inner_icmp);
-    if (!icmp) {
-        return;
-    }
-
-    size_t probe_id = get_icmp_probe_id(ctx, icmp);
-    if (probe_id == -1) {
-        free(icmp);
-        return;
-    }
-
-    t_query *query = get_hop_query(ctx, icmp, probe_id);
-    if (!query) {
-        free(icmp);
-        return;
-    }
-
-    query->rep = icmp;
-    query->rtt = get_elapsed_ms(query->req->send_time, recv_time);
-}
-
-void process_icmp_reply_udp(t_context *ctx, uint8_t *icmp_raw, ssize_t bytes_received, struct timeval recv_time) {
-    t_icmp *icmp = init_icmp_reply(icmp_raw, (size_t)bytes_received, parse_icmp_inner_udp);
-    if (!icmp) {
-        return;
-    }
-
-    size_t probe_id = get_udp_probe_id(ctx, icmp);
-    if (probe_id == -1) {
-        free(icmp);
-        return;
-    }
-
-    t_query *query = get_hop_query(ctx, icmp, probe_id);
-    if (!query) {
-        free(icmp);
-        return;
-    }
-
-    query->rep = icmp;
-    query->rtt = get_elapsed_ms(query->req->send_time, recv_time);
-
-    if (!ctx->unreached_port_ttl && query->rep->hdr.type == ICMP_DEST_UNREACH && query->rep->hdr.code == ICMP_PORT_UNREACH) {            
-        ctx->unreached_port_ttl = (probe_id / ctx->queries) + ctx->first_ttl;;
-    }
-}
-
 void process_icmp_reply(t_context *ctx, uint8_t *icmp_raw, ssize_t bytes_received, struct timeval recv_time,
                         int (*parse_inner_hdr)(t_icmp *, uint8_t *, size_t, size_t),
                         int (*get_probe_id)(t_context *, t_icmp *)) 
@@ -188,33 +161,32 @@ void process_icmp_reply(t_context *ctx, uint8_t *icmp_raw, ssize_t bytes_receive
     if (!icmp) {
         return;
     }
-
+    
     size_t probe_id = get_probe_id(ctx, icmp);
     if (probe_id == -1) {
         free(icmp);
         return;
     }
-
+    
     t_query *query = get_hop_query(ctx, icmp, probe_id);
     if (!query) {
         free(icmp);
         return;
     }
-
+    
     query->rep = icmp;
     query->rtt = get_elapsed_ms(query->req->send_time, recv_time);
 
-    if (ctx->method == MTD_DEFAULT && !ctx->unreached_port_ttl && 
-        query->rep->hdr.type == ICMP_DEST_UNREACH && query->rep->hdr.code == ICMP_PORT_UNREACH) {            
-        ctx->unreached_port_ttl = (probe_id / ctx->queries) + ctx->first_ttl;
+    if (is_final_reply(ctx, icmp) && !ctx->final_ttl) {            
+        ctx->final_ttl = (probe_id / ctx->queries) + ctx->first_ttl;
     }
 }
 
 void recv_icmp_reply(t_context *ctx) {
     uint8_t icmp_raw[ICMP_REPLY_MAX_LEN];
+    struct timeval recv_time;
 
     ssize_t bytes_received = recvfrom(ctx->icmp_sock->fd , icmp_raw, sizeof(icmp_raw), 0, NULL, NULL);
-    struct timeval recv_time;
     if (bytes_received <= 0 || gettimeofday(&recv_time, NULL) == -1) {
         return;
     }

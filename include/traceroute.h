@@ -102,6 +102,10 @@ typedef struct s_hop {
     t_query *queries;
 } t_hop;
 
+struct icmp_filter {
+    uint32_t data;
+};
+
 typedef struct s_context {    
     char *host_str;
     struct sockaddr_storage *host_addr;
@@ -128,7 +132,7 @@ typedef struct s_context {
     t_query **active_queries;
     t_hop *hops;
     size_t next_hop;
-    size_t unreached_port_ttl;
+    size_t final_ttl;
     bool unreachable_hop;
 } t_context;
 

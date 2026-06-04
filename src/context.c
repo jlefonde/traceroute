@@ -76,7 +76,7 @@ t_context *init_ctx(t_option *options, char *host) {
     ctx->current_port = ctx->port;
     ctx->timeout = 5;
     ctx->packet_len = 60;
-    ctx->unreached_port_ttl = 0;
+    ctx->final_ttl = 0;
 
     t_option *no_rev_opt = get_option_by_index(options, OPT_NO_REVERSE);
     if (no_rev_opt && no_rev_opt->is_set) {

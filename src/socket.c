@@ -68,12 +68,13 @@ t_socket *init_icmp_socket() {
         return NULL;
     }
 
-    unsigned int icmp_filter = ~0U;
-    icmp_filter &= ~(1U << ICMP_DEST_UNREACH);
-    icmp_filter &= ~(1U << ICMP_TIME_EXCEEDED);
-    icmp_filter &= ~(1U << ICMP_ECHOREPLY);
+    struct icmp_filter filter;
+    filter.data = ~0U;
+    filter.data &= ~(1U << ICMP_DEST_UNREACH);
+    filter.data &= ~(1U << ICMP_TIME_EXCEEDED);
+    filter.data &= ~(1U << ICMP_ECHOREPLY);
 
-    if (setsockopt(icmp_sock->fd , SOL_RAW, ICMP_FILTER, &icmp_filter, sizeof(icmp_filter)) == -1) {
+    if (setsockopt(icmp_sock->fd, SOL_RAW, ICMP_FILTER, &filter, sizeof(filter)) == -1) {
         fprintf(stderr, "error: failed to set ICMP socket options: %s\n", strerror(errno));
         free(icmp_sock);
         return NULL;

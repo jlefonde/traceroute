@@ -135,10 +135,6 @@ int send_icmp_probe(t_context *ctx, size_t active_query_idx) {
 }
 
 int send_udp_probe(t_context *ctx, size_t active_query_idx) {
-    if (ctx->unreached_port_ttl > 0 && ctx->current_ttl > ctx->unreached_port_ttl) {
-        return 0;
-    }
-
     size_t hop_query_idx = (ctx->current_port - ctx->port) % ctx->queries;
     t_probe *probe = init_probe(ctx, active_query_idx, hop_query_idx, init_udp_probe);
     if (!probe) {
@@ -162,6 +158,10 @@ int send_udp_probe(t_context *ctx, size_t active_query_idx) {
 
 int send_probe(t_context *ctx) {
     if (ctx->current_ttl > ctx->max_ttl) {
+        return 0;
+    }
+
+    if (ctx->final_ttl > 0 && ctx->current_ttl > ctx->final_ttl) {
         return 0;
     }
 
@@ -255,7 +255,7 @@ static void print_hop(t_context *ctx, t_hop *hop) {
 
 void print_available_hops(t_context *ctx) {
     while (ctx->next_hop < ctx->max_ttl && 
-            (ctx->unreached_port_ttl == 0 || ctx->next_hop < ctx->unreached_port_ttl) &&
+            (ctx->final_ttl == 0 || ctx->next_hop < ctx->final_ttl) &&
             !ctx->unreachable_hop) 
     {
         t_hop *hop = &ctx->hops[ctx->next_hop];
