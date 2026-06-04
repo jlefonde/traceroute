@@ -1,4 +1,4 @@
-#include "traceroute.h"
+#include "../include/traceroute.h"
 
 static int get_active_query_idx(t_context *ctx) {
     for (size_t i = 0; i < ctx->sim_queries; i++) {
@@ -105,7 +105,8 @@ static t_probe *init_probe(t_context *ctx, size_t active_query_idx, size_t hop_q
 }
 
 int send_icmp_probe(t_context *ctx, size_t active_query_idx) {
-    t_probe *probe = init_probe(ctx, active_query_idx, (ctx->current_seq - 1) % ctx->queries, init_icmp_probe);
+    size_t hop_query_idx = (ctx->current_seq - 1) % ctx->queries;
+    t_probe *probe = init_probe(ctx, active_query_idx, hop_query_idx, init_icmp_probe);
     if (!probe) {
         return -1;
     }
@@ -138,7 +139,8 @@ int send_udp_probe(t_context *ctx, size_t active_query_idx) {
         return 0;
     }
 
-    t_probe *probe = init_probe(ctx, active_query_idx, (ctx->current_port - ctx->port) % ctx->queries, init_udp_probe);
+    size_t hop_query_idx = (ctx->current_port - ctx->port) % ctx->queries;
+    t_probe *probe = init_probe(ctx, active_query_idx, hop_query_idx, init_udp_probe);
     if (!probe) {
         return -1;
     }

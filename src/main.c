@@ -34,7 +34,7 @@ int main(int argc, char **argv) {
         set_timeout(ctx, &timeout);
 
         if (select(ctx->icmp_sock->fd + 1, &read_fds, NULL, NULL, &timeout) > 0) {
-            process_icmp_reply(ctx);
+            recv_icmp_reply(ctx);
         }
 
         update_active_queries(ctx);

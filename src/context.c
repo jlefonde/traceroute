@@ -1,4 +1,4 @@
-#include "traceroute.h"
+#include "../include/traceroute.h"
 
 #define MIN_TTL_VALUE 1
 #define MAX_TTL_VALUE 255

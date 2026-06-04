@@ -1,4 +1,4 @@
-#include "traceroute.h"
+#include "../include/traceroute.h"
 
 t_option *init_options() {
     static t_option options[] = {

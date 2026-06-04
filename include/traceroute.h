@@ -148,7 +148,7 @@ int send_probe(t_context *ctx);
 void set_timeout(t_context *ctx, struct timeval *timeout);
 void update_active_queries(t_context *ctx);
 void print_available_hops(t_context *ctx);
-void process_icmp_reply(t_context *ctx);
+void recv_icmp_reply(t_context *ctx);
 double get_elapsed_ms(struct timeval start, struct timeval end);
 t_option *get_option_short(t_option *options, char opt);
 t_option *get_option_long(t_option *options, char *opt);

@@ -1,4 +1,4 @@
-#include "traceroute.h"
+#include "../include/traceroute.h"
 
 void print_helper(t_option *options) {
     printf("usage: ./ft_traceroute <host> [options]\n");

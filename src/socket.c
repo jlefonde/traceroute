@@ -1,4 +1,4 @@
-#include "traceroute.h"
+#include "../include/traceroute.h"
 
 void free_socket(t_socket *sock) {
     if (!sock) {
@@ -71,6 +71,7 @@ t_socket *init_icmp_socket() {
     unsigned int icmp_filter = ~0U;
     icmp_filter &= ~(1U << ICMP_DEST_UNREACH);
     icmp_filter &= ~(1U << ICMP_TIME_EXCEEDED);
+    icmp_filter &= ~(1U << ICMP_ECHOREPLY);
 
     if (setsockopt(icmp_sock->fd , SOL_RAW, ICMP_FILTER, &icmp_filter, sizeof(icmp_filter)) == -1) {
         fprintf(stderr, "error: failed to set ICMP socket options: %s\n", strerror(errno));
