@@ -53,12 +53,6 @@ t_option *init_options() {
     return options;
 }
 
-static bool set_option_value(t_option *option, char *argv) {
-    option->value = argv;
-    option->is_set = true;
-    return true;
-}
-
 int parse_short_option(t_option *options, char ***argv) {
     char *curr_str = **argv;
     int len = ft_strlen(curr_str);
@@ -79,9 +73,8 @@ int parse_short_option(t_option *options, char ***argv) {
 
         if (i == len - 1 && (*argv)[1]) {
             (*argv)++;
-            if (!set_option_value(option, **argv)) {
-                return -1;
-            }
+            option->value = **argv;
+            option->is_set = true;
         }
         else {
             fprintf(stderr, "error: option '-%c' requires an argument\n", short_opt);
@@ -105,9 +98,8 @@ int parse_long_option(t_option *options, char ***argv) {
         option->is_set = true;
     } else if ((*argv)[1]) {
         (*argv)++;
-        if (!set_option_value(option, **argv)) {
-            return -1;
-        }
+        option->value = **argv;
+        option->is_set = true;
     } else {
         fprintf(stderr, "error: option '--%s' requires an argument\n", long_opt);
         return -1;

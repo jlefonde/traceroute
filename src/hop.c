@@ -67,7 +67,7 @@ static t_probe *init_icmp_probe(t_context *ctx) {
     probe->ttl = ctx->current_ttl;
     probe->icmp.hdr.type = ICMP_ECHO;
     probe->icmp.hdr.code = 0;
-    probe->icmp.hdr.un.echo.id = ntohs(ctx->pid);
+    probe->icmp.hdr.un.echo.id = ntohs(ctx->pid & 0xFFFF);
     probe->icmp.hdr.un.echo.sequence = ntohs(ctx->current_seq++);
     probe->icmp.hdr.checksum = 0;
 

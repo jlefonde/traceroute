@@ -66,7 +66,7 @@ static t_icmp *init_icmp_reply(uint8_t *icmp_raw, size_t icmp_raw_size,
 }
 
 static int get_echo_probe_id(t_context *ctx, uint16_t id, uint16_t seq) {
-    if (id != htons(ctx->pid)) {
+    if (id != htons(ctx->pid & 0xFFFF)) {
         return -1;
     }
 
